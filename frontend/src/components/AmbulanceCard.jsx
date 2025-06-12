@@ -1,0 +1,1 @@
+// Ambulance card component

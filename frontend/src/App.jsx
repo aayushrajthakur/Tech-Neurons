@@ -1,1 +1,1 @@
-// React main App component
+// Main App component

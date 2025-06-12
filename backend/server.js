@@ -1,1 +1,1 @@
-// Entry point for Express server
+// Main server entry point

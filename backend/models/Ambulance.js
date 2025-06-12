@@ -1,0 +1,1 @@
+// Ambulance schema
