@@ -102,6 +102,7 @@ Heatmap overlays of predicted emergencies
 Simulation mode for emergency testing
 
 👨‍💻 Team Roles
+
 Yash Machhi – Frontend + Backend (Full MERN stack)
 
 Dipesh Chaudhary – AI Voice/NLP & Flask API
