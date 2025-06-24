@@ -4,22 +4,11 @@ const Emergency = require("../models/Emergency");
 
 
 
-// @desc Add new emergency
-exports.createEmergency = async (req, res) => {
-  try {
-    const emergency = new Emergency(req.body);
-    await emergency.save();
-    res.status(201).json(emergency);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-};
-
 // @desc Get all emergencies
 exports.getAllEmergencies = async (req, res) => {
   try {
     const emergencies = await Emergency.find().sort({ timestamp: -1 });
-    res.status(200).json(emergencies);
+    res.status(200).json({ data: emergencies }); // ✅ Wrap in object
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -28,6 +17,26 @@ exports.getAllEmergencies = async (req, res) => {
 
 const Ambulance = require("../models/Ambulance");
 const Hospital = require("../models/Hospital");
+exports.createEmergency = async (req, res) => {
+  try {
+    const emergency = new Emergency(req.body);
+    await emergency.save();
+
+    // ✅ Emit to clients
+    const io = req.app.get("io");
+    io.emit("incidentReported", {
+      lat: emergency.location.lat,
+      lng: emergency.location.lng,
+      type: emergency.category,
+      severity: emergency.priority,
+      time: emergency.timestamp,
+    });
+
+    res.status(201).json(emergency);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
 
 exports.handleEmergency = async (req, res) => {
   const { patientLocation } = req.body;
@@ -75,6 +84,14 @@ exports.handleEmergency = async (req, res) => {
       ambulance: nearestAmbulance,
     });
 
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+exports.deleteAllEmergencies = async (req, res) => {
+  try {
+    await Emergency.deleteMany({});
+    res.status(200).json({ message: "All emergencies have been deleted." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

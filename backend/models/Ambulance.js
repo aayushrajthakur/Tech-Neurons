@@ -1,4 +1,3 @@
-// Ambulance schema
 const mongoose = require("mongoose");
 
 const ambulanceSchema = new mongoose.Schema({
@@ -10,8 +9,29 @@ const ambulanceSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["available", "busy"],
+    enum: ["available", "busy", "dispatched", "transporting"],
     default: "available"
+  },
+  currentEmergency: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Emergency"
+  },
+  destination: {
+    type: {
+      type: String, // e.g., 'emergency'
+    },
+    location: {
+      lat: Number,
+      lng: Number
+    },
+    hospitalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Hospital"
+    },
+    hospitalLocation: {
+      lat: Number,
+      lng: Number
+    }
   }
 });
 

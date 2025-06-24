@@ -1,1 +1,0 @@
-// Map view with Leaflet

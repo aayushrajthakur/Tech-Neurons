@@ -1,16 +1,82 @@
-// socketHandler.js
-module.exports = function (io) {
-  io.on("connection", (socket) => {
-    console.log("🟢 New client connected:", socket.id);
+const Ambulance = require('../models/Ambulance');
 
-    socket.on("clientMessage", (msg) => {
-      console.log("📨 Message from client:", msg);
+let ioInstance = null;
+
+const setSocketInstance = (io) => {
+  ioInstance = io;
+
+  io.on('connection', async (socket) => {
+    console.log('🟢 Client connected:', socket.id);
+
+    try {
+      const ambulances = await Ambulance.find();
+
+      const formattedData = ambulances.map((amb) => ({
+        id: amb._id,
+        ambulance_id: amb.ambulance_id,
+        lat: amb.currentLocation.lat,
+        lng: amb.currentLocation.lng,
+        status: amb.status,
+        driverName: amb.driverName,
+      }));
+
+      socket.emit('ambulanceLocationUpdate', formattedData);
+      console.log('📡 Sent initial ambulance data to', socket.id);
+    } catch (err) {
+      console.error('❌ Error on initial fetch:', err.message);
+    }
+
+    socket.on('incidentReported', (data) => {
+      console.log('🚨 Received incident from client:', data);
+      io.emit('incidentReported', data);
     });
 
-    socket.on("disconnect", () => {
-      console.log("🔴 Client disconnected:", socket.id);
+    socket.on('disconnect', () => {
+      console.log('🔴 Disconnected:', socket.id);
     });
   });
 
-  //console.log("✅ SocketHandler loaded");
+  // Update ambulance locations every 5 seconds
+  setInterval(async () => {
+    try {
+      const ambulances = await Ambulance.find({ status: 'dispatched' });
+
+      const updatedAmbulances = await Promise.all(
+        ambulances.map(async (amb) => {
+          const latShift = (Math.random() - 0.5) * 0.001;
+          const lngShift = (Math.random() - 0.5) * 0.001;
+
+          amb.currentLocation.lat += latShift;
+          amb.currentLocation.lng += lngShift;
+          await amb.save();
+
+          return {
+            id: amb._id,
+            ambulance_id: amb.ambulance_id,
+            lat: amb.currentLocation.lat,
+            lng: amb.currentLocation.lng,
+            status: amb.status,
+            driverName: amb.driverName,
+          };
+        })
+      );
+
+      if (updatedAmbulances.length > 0) {
+        io.emit('ambulanceLocationUpdate', updatedAmbulances);
+        console.log(`🔄 Updated ${updatedAmbulances.length} dispatched ambulances`);
+      }
+    } catch (err) {
+      console.error('❌ Error updating ambulance locations:', err.message);
+    }
+  }, 5000);
+};
+
+const getSocketInstance = () => {
+  if (!ioInstance) throw new Error('Socket.IO instance not initialized');
+  return ioInstance;
+};
+
+module.exports = {
+  setSocketInstance,
+  getSocketInstance
 };

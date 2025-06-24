@@ -6,46 +6,60 @@ const dotenv = require("dotenv");
 const http = require("http");
 const socketIO = require("socket.io");
 const dashboardController = require("./controllers/dashboardController");
-// Load environment variables
-dotenv.config();
+const startAmbulanceTracking = require("./utils/simulateAmbulanceMovement");
+const connectDB = require("./config/db");
+const { setSocketInstance } = require("./socket/socketHandler");
 
-// Initialize Express
+dotenv.config(); // Load .env variables
+
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
-  cors: {
-    origin: "*",
-  },
+  cors: { origin: "*" },
 });
 
-// Attach io instance to app
 app.set("io", io);
 
-// Initialize Middleware
+// ✅ Middleware
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB
-const connectDB = require("./config/db");
-connectDB();
-
-// Load Socket Handler
-require("./socket/socketHandler")(io); // 👍 Handles real-time events
-
-
-// Test route
+// ✅ Routes and Controllers
 app.get("/", (req, res) => {
   res.send("ERS-2 Backend is running ✅");
 });
 
-// API Routes
 app.use("/api/emergency", require("./routes/emergencyRoutes"));
 app.use("/api/ambulance", require("./routes/ambulanceRoutes"));
-app.use("/api/ambulances", require("./routes/ambulanceRoutes")); // Optional: if using both singular/plural
 app.use("/api/hospitals", require("./routes/hospitalRoutes"));
-app.use("/api/dispatch", require("./routes/dispatchRoutes"));
+app.use("/api/dispatch", require("./routes/dispatchRoutes")); // ✅ Correct dispatch route
 app.get("/api/dashboard/summary", dashboardController.getFullDashboardSummary);
 
-// Start Server
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("🔥 Server Error:", err.stack);
+  res.status(500).json({ error: "Internal Server Error" });
+});
+
+// ✅ Connect to DB and start server after successful connection
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+connectDB()
+  .then(() => {
+    console.log("✅ MongoDB connected");
+    setSocketInstance(io); // ✅ Attach Socket.IO
+    startAmbulanceTracking(); // ✅ Start movement simulation only after DB is connected
+
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ Failed to connect to MongoDB:", err.message);
+    process.exit(1);
+  });

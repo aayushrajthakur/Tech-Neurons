@@ -1,1 +1,1 @@
-// Emergency hotspot heatmap
+// Heatmap.jsx - placeholder

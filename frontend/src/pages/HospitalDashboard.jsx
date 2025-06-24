@@ -1,1 +1,1 @@
-// Hospital dashboard view
+// HospitalDashboard.jsx - placeholder

@@ -6,7 +6,8 @@ const {
   getAvailableAmbulances,
   updateLocation,
   updateStatus,
-  getAmbulanceStatus
+  getAmbulanceStatus,
+  updateAmbulanceLocation
 } = require("../controllers/ambulanceController");
 
 router.post("/", createAmbulance);
@@ -14,6 +15,6 @@ router.get("/", getAvailableAmbulances);
 router.put("/:id/location", updateLocation);
 router.patch("/:id/status", updateStatus);
 router.get("/status", getAmbulanceStatus);
-
+router.patch("/update", updateAmbulanceLocation);
 
 module.exports = router;
