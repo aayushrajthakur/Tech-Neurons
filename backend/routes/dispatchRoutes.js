@@ -14,6 +14,8 @@ router.get('/emergency/:emergencyId', dispatchController.getEmergencyDetails);
 router.put('/ambulance/:ambulanceId/location', dispatchController.updateAmbulanceLocation);
 router.put('/emergency/:emergencyId/arrived', dispatchController.markArrivedAtEmergency);
 router.put('/emergency/:emergencyId/transporting', dispatchController.markTransporting);
+
+router.put('/dispatch/arrived-at-hospital/:emergencyId', dispatchController.markArrivedAtHospital);
 router.put('/emergency/:emergencyId/complete', dispatchController.completeEmergency);
 
 module.exports = router;

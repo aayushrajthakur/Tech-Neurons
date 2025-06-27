@@ -1,5 +1,5 @@
 // controllers/dispatchController.js
-
+const moment = require('moment-timezone');
 const Hospital = require("../models/Hospital");
 const Ambulance = require("../models/Ambulance");
 const Emergency = require("../models/Emergency");
@@ -10,11 +10,11 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371; // Earth's radius in kilometers
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
 
@@ -47,10 +47,10 @@ const findBestHospital = async (emergencyLocation, category = null, priority = "
 
     // Reduce score if hospital has relevant specialty
     if (category && hospital.specialties && hospital.specialties.length > 0) {
-      const hasRelevantSpecialty = hospital.specialties.some(specialty => 
+      const hasRelevantSpecialty = hospital.specialties.some(specialty =>
         specialty.toLowerCase().includes(category.toLowerCase()) ||
-        (category.toLowerCase() === 'medical' && 
-         ['emergency', 'trauma', 'cardiology', 'surgery'].includes(specialty.toLowerCase()))
+        (category.toLowerCase() === 'medical' &&
+          ['emergency', 'trauma', 'cardiology', 'surgery'].includes(specialty.toLowerCase()))
       );
       if (hasRelevantSpecialty) {
         score -= 2; // Prefer hospitals with relevant specialties
@@ -87,7 +87,7 @@ const findBestAmbulance = async (emergencyLocation, priority = "MEDIUM") => {
 
   // For high priority emergencies, always choose the closest
   ambulanceDistances.sort((a, b) => a.distance - b.distance);
-  
+
   // For high priority, return the closest
   // For medium/low priority, we could implement additional logic here
   return ambulanceDistances[0];
@@ -102,16 +102,16 @@ exports.dispatchEmergency = async (req, res) => {
     // Find the emergency
     const emergency = await Emergency.findById(emergencyId);
     if (!emergency) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Emergency not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Emergency not found"
       });
     }
 
     if (emergency.status !== "pending") {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Emergency already dispatched or resolved" 
+      return res.status(400).json({
+        success: false,
+        error: "Emergency already dispatched or resolved"
       });
     }
 
@@ -211,8 +211,8 @@ exports.dispatchEmergency = async (req, res) => {
       });
     }
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "Emergency dispatched successfully",
       data: {
         emergencyId: updatedEmergency._id,
@@ -229,9 +229,9 @@ exports.dispatchEmergency = async (req, res) => {
 
   } catch (error) {
     console.error("Dispatch error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -241,14 +241,14 @@ exports.dispatchEmergency = async (req, res) => {
 exports.getActiveDispatches = async (req, res) => {
   try {
     // Find all emergencies that are dispatched
-    const activeEmergencies = await Emergency.find({ 
-      status: "dispatched" 
+    const activeEmergencies = await Emergency.find({
+      status: "dispatched"
     })
-    .populate({
-      path: 'assignedAmbulance',
-      model: 'Ambulance'
-    })
-    .sort({ timestamp: -1 });
+      .populate({
+        path: 'assignedAmbulance',
+        model: 'Ambulance'
+      })
+      .sort({ timestamp: -1 });
 
     const dispatches = [];
 
@@ -307,9 +307,9 @@ exports.getActiveDispatches = async (req, res) => {
 
   } catch (error) {
     console.error("Get active dispatches error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -321,9 +321,9 @@ exports.updateAmbulanceLocation = async (req, res) => {
     const { lat, lng } = req.body;
 
     if (!lat || !lng) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Latitude (lat) and longitude (lng) are required" 
+      return res.status(400).json({
+        success: false,
+        error: "Latitude (lat) and longitude (lng) are required"
       });
     }
 
@@ -336,9 +336,9 @@ exports.updateAmbulanceLocation = async (req, res) => {
     );
 
     if (!ambulance) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Ambulance not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Ambulance not found"
       });
     }
 
@@ -367,9 +367,9 @@ exports.updateAmbulanceLocation = async (req, res) => {
 
   } catch (error) {
     console.error("Update location error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -386,29 +386,29 @@ exports.markArrivedAtEmergency = async (req, res) => {
       });
 
     if (!emergency) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Emergency not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Emergency not found"
       });
     }
 
     if (emergency.status !== "dispatched") {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Emergency is not in dispatched status" 
+      return res.status(400).json({
+        success: false,
+        error: "Emergency is not in dispatched status"
       });
     }
 
     // Update ambulance status to busy (at emergency location)
     await Ambulance.findByIdAndUpdate(
-  emergency.assignedAmbulance._id,
-  { status: "busy" }
-);
+      emergency.assignedAmbulance._id,
+      { status: "busy" }
+    );
 
-await Emergency.findByIdAndUpdate(
-  emergency._id,
-  { status: "arrived_at_emergency" }
-);
+    await Emergency.findByIdAndUpdate(
+      emergency._id,
+      { status: "arrived_at_emergency" }
+    );
 
     const io = getSocketInstance();
     if (io) {
@@ -426,41 +426,89 @@ await Emergency.findByIdAndUpdate(
 
   } catch (error) {
     console.error("Mark arrived at emergency error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
 
 // Mark ambulance as transporting patient to hospital
 exports.markTransporting = async (req, res) => {
-  try {
-    const { emergencyId } = req.params;
+  const { emergencyId } = req.params;
 
-    const emergency = await Emergency.findById(emergencyId)
-      .populate({
-        path: 'assignedAmbulance',
-        model: 'Ambulance'
-      });
+  try {
+    const emergency = await Emergency.findById(emergencyId).populate('assignedAmbulance');
 
     if (!emergency) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Emergency not found" 
-      });
+      return res.status(404).json({ success: false, message: "Emergency not found" });
     }
 
-    // Update ambulance status to transporting
-    await Ambulance.findByIdAndUpdate(
-      emergency.assignedAmbulance._id,
-      { status: "transporting" }
-    );
+    const ambulance = emergency.assignedAmbulance;
+
+    if (!ambulance) {
+      return res.status(400).json({ success: false, message: "Ambulance not assigned" });
+    }
+
+    // ✅ Update ambulance status
+    await Ambulance.findByIdAndUpdate(ambulance._id, { status: "transporting" });
+
+    // ✅ Update emergency status
+    await Emergency.findByIdAndUpdate(emergencyId, { status: "transporting" });
 
     const io = getSocketInstance();
     if (io) {
-      io.emit("ambulance:transporting", {
-        emergencyId: emergency._id,
+      io.emit('emergency:updated', {
+        ...emergency.toObject(),
+        status: 'transporting'
+      });
+
+      io.emit('ambulance:transporting', {
+        emergencyId,
+        ambulanceId: ambulance._id,
+        timestamp: new Date()
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Marked as transporting',
+      data: {
+        emergencyId,
+        ambulanceId: ambulance._id,
+        status: 'transporting'
+      }
+    });
+
+  } catch (error) {
+    console.error('Transporting error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+exports.markArrivedAtHospital = async (req, res) => {
+  try {
+    const { emergencyId } = req.params;
+
+    const emergency = await Emergency.findById(emergencyId).populate('assignedAmbulance');
+    if (!emergency) {
+      return res.status(404).json({ success: false, error: "Emergency not found" });
+    }
+
+    // Update ambulance status to busy/at hospital
+    await Ambulance.findByIdAndUpdate(emergency.assignedAmbulance._id, {
+      status: "arrived_at_hospital"
+    });
+
+    // Update emergency status
+    await Emergency.findByIdAndUpdate(emergencyId, {
+      status: "arrived_at_hospital"
+    });
+
+    const io = getSocketInstance();
+    if (io) {
+      io.emit("ambulance:arrived-hospital", {
+        emergencyId,
         ambulanceId: emergency.assignedAmbulance._id,
         timestamp: new Date()
       });
@@ -468,17 +516,15 @@ exports.markTransporting = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Marked as transporting patient"
+      message: "Ambulance arrived at hospital"
     });
-
   } catch (error) {
-    console.error("Mark transporting error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    console.error("Mark arrived at hospital error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
+
+
 
 // Complete emergency (arrived at hospital)
 exports.completeEmergency = async (req, res) => {
@@ -492,9 +538,9 @@ exports.completeEmergency = async (req, res) => {
       });
 
     if (!emergency) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Emergency not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Emergency not found"
       });
     }
 
@@ -540,9 +586,9 @@ exports.completeEmergency = async (req, res) => {
 
   } catch (error) {
     console.error("Complete emergency error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -556,8 +602,14 @@ exports.getDispatchStats = async (req, res) => {
     const totalEmergencies = await Emergency.countDocuments();
     const pendingEmergencies = await Emergency.countDocuments({ status: "pending" });
     const activeDispatches = await Emergency.countDocuments({ status: "dispatched" });
-    const resolvedToday = await Emergency.countDocuments({ status: "resolved", timestamp: { $gte: today } });
+    //const resolvedToday = await Emergency.countDocuments({ status: "resolved", timestamp: { $gte: today } });
+    const startOfDayIST = moment.tz('Asia/Kolkata').startOf('day').toDate();
 
+    const completedToday = await Emergency.countDocuments({
+      status: 'resolved',
+      timestamp: { $gte: startOfDayIST }
+    });
+    //console.error("completed resolved:",completedToday);
     const totalAmbulances = await Ambulance.countDocuments();
     const availableAmbulances = await Ambulance.countDocuments({ status: "available" });
     const busyAmbulances = await Ambulance.countDocuments({ status: { $in: ["dispatched", "busy", "transporting"] } });
@@ -572,7 +624,7 @@ exports.getDispatchStats = async (req, res) => {
         totalEmergencies,
         pendingEmergencies,
         activeDispatches,
-        resolvedToday,
+        completedToday,
         totalAmbulances,
         availableAmbulances,
         busyAmbulances,
@@ -585,9 +637,9 @@ exports.getDispatchStats = async (req, res) => {
 
   } catch (error) {
     console.error("Get stats error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -598,7 +650,7 @@ const calculateAverageHospitalLoad = async () => {
   try {
     const hospitals = await Hospital.find({}, 'load');
     if (hospitals.length === 0) return 0;
-    
+
     const totalLoad = hospitals.reduce((sum, hospital) => sum + hospital.load, 0);
     return Math.round((totalLoad / hospitals.length) * 100) / 100;
   } catch (error) {
@@ -652,16 +704,16 @@ exports.getEmergencyDetails = async (req, res) => {
       });
 
     if (!emergency) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Emergency not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Emergency not found"
       });
     }
 
     let hospital = null;
-    if (emergency.assignedAmbulance && 
-        emergency.assignedAmbulance.destination && 
-        emergency.assignedAmbulance.destination.hospitalId) {
+    if (emergency.assignedAmbulance &&
+      emergency.assignedAmbulance.destination &&
+      emergency.assignedAmbulance.destination.hospitalId) {
       hospital = await Hospital.findById(emergency.assignedAmbulance.destination.hospitalId);
     }
 
@@ -699,9 +751,9 @@ exports.getEmergencyDetails = async (req, res) => {
 
   } catch (error) {
     console.error("Get emergency details error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };

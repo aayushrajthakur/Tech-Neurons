@@ -59,9 +59,10 @@ const updateStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!["available", "busy"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status value" });
-  }
+ if (!["available", "busy", "dispatched", "transporting", "arrived_at_emergency"].includes(status)) {
+  return res.status(400).json({ error: "Invalid status value" });
+}
+
 
   try {
     const ambulance = await Ambulance.findById(id);

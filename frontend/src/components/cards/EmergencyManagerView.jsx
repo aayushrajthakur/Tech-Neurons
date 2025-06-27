@@ -14,6 +14,7 @@ const EmergencyManagerView = ({
   onDispatchEmergency,
   onMarkArrived,
   onMarkTransporting,
+  onMarkArrivedAtHospital, // ✅ NEW
   onCompleteEmergency,
   onUpdateAmbulanceLocation
 }) => {
@@ -33,7 +34,6 @@ const EmergencyManagerView = ({
       </div>
     );
   }
- //console.log("👀 Received pendingEmergencies:", pendingEmergencies);
 
   return (
     <div className="emergency-manager-view px-6 py-4 max-w-6xl mx-auto">
@@ -135,18 +135,16 @@ const EmergencyManagerView = ({
           )}
         </TabsContent>
 
-        {/* Pending Emergencies with Grouped Statuses */}
+        {/* Pending Emergencies (grouped by status) */}
         <TabsContent value="pending" className="space-y-4">
-          
           {pendingEmergencies.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
               <div className="text-4xl mb-2">🆘</div>
               <p>No pending emergencies</p>
             </div>
           ) : (
-            ['pending', 'dispatched', 'arrived_at_emergency', 'transporting'].map((statusKey) => {
+            ['pending', 'dispatched', 'arrived_at_emergency', 'transporting', 'arrived_at_hospital'].map((statusKey) => {
               const group = pendingEmergencies.filter((e) => e.status === statusKey);
-              console.log("Grouped status:", statusKey, group); // 🔍 Debug line
 
               if (group.length === 0) return null;
 
@@ -162,6 +160,10 @@ const EmergencyManagerView = ({
                         emergency={emergency}
                         onUpdate={onRefreshData}
                         onDispatchEmergency={onDispatchEmergency}
+                        onMarkArrived={onMarkArrived}
+                        onMarkTransporting={onMarkTransporting}
+                        onMarkArrivedAtHospital={onMarkArrivedAtHospital} 
+                        onCompleteEmergency={onCompleteEmergency}
                         isPending={true}
                       />
                     ))}
@@ -185,6 +187,10 @@ const EmergencyManagerView = ({
                 key={emergency._id}
                 emergency={emergency}
                 onUpdate={onRefreshData}
+                onMarkArrived={onMarkArrived}
+                onMarkTransporting={onMarkTransporting}
+                onMarkArrivedAtHospital={onMarkArrivedAtHospital} 
+                onCompleteEmergency={onCompleteEmergency}
                 isPending={false}
               />
             ))

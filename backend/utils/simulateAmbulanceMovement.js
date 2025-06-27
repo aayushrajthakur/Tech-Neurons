@@ -3,7 +3,6 @@ const Emergency = require('../models/Emergency');
 const Hospital = require('../models/Hospital');
 const { getSocketInstance } = require('../socket/socketHandler');
 
-// Helper to simulate movement
 function moveTowards(current, target, speed = 0.0005) {
   const latDiff = target.lat - current.lat;
   const lngDiff = target.lng - current.lng;
@@ -15,7 +14,6 @@ function moveTowards(current, target, speed = 0.0005) {
   };
 }
 
-// Helper to calculate distance between coordinates
 function calculateDistance(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -46,7 +44,6 @@ const startAmbulanceTracking = () => {
         if (amb.status === 'dispatched') {
           destination = amb.destination?.location;
         } else if (amb.status === 'busy') {
-          // Stay at emergency location
           updatedAmbulances.push({
             id: amb._id,
             ambulance_id: amb.ambulance_id,
@@ -61,27 +58,24 @@ const startAmbulanceTracking = () => {
           destination = amb.destination?.hospitalLocation;
         }
 
-        if (!destination) continue;
+        if (!destination || typeof destination.lat !== 'number' || typeof destination.lng !== 'number') {
+          console.error(`❌ Invalid destination for ambulance ${amb.ambulance_id}`);
+          continue;
+        }
 
-        // === Start speed tracking ===
         const oldLat = amb.currentLocation.lat;
         const oldLng = amb.currentLocation.lng;
         const oldTime = Date.now();
 
-        const currentDistance = calculateDistance(
-          oldLat, oldLng,
-          destination.lat, destination.lng
-        );
+        const distance = calculateDistance(oldLat, oldLng, destination.lat, destination.lng);
 
-        // If ambulance reached destination
-        if (currentDistance < 0.05) {
+        if (distance < 0.05) {
           amb.currentLocation = destination;
 
           if (amb.status === 'dispatched') {
             amb.status = 'busy';
             await amb.save();
 
-            // ✅ Update emergency status to valid enum
             const emergency = await Emergency.findById(amb.currentEmergency);
             if (emergency) {
               emergency.status = 'arrived_at_emergency';
@@ -107,18 +101,27 @@ const startAmbulanceTracking = () => {
             });
 
             console.log(`✅ Ambulance ${amb.ambulance_id} arrived at emergency and is now BUSY`);
+
           } else if (amb.status === 'transporting') {
-            amb.status = 'available';
-            const emergencyId = amb.currentEmergency;
-            const hospitalId = amb.destination?.hospitalId;
-            amb.currentEmergency = null;
-            amb.destination = null;
+            // 🆕 STEP: Mark arrived at hospital
+            amb.status = 'arrived_at_hospital';
             await amb.save();
+
+            const emergency = await Emergency.findById(amb.currentEmergency);
+            if (emergency) {
+              emergency.status = 'arrived_at_hospital';
+              await emergency.save();
+
+              io.emit('emergency-status-updated', {
+                emergencyId: emergency._id,
+                newStatus: 'arrived_at_hospital'
+              });
+            }
 
             io.emit('ambulance-status-updated', {
               ambulanceId: amb._id,
               ambulance_id: amb.ambulance_id,
-              newStatus: 'available'
+              newStatus: 'arrived_at_hospital'
             });
 
             io.emit('ambulance-location-updated', {
@@ -128,27 +131,40 @@ const startAmbulanceTracking = () => {
               speed: 0
             });
 
-            // ✅ Resolve emergency
-            const emergency = await Emergency.findById(emergencyId);
-            if (emergency) {
-              emergency.status = 'resolved';
-              await emergency.save();
+            console.log(`✅ Ambulance ${amb.ambulance_id} arrived at hospital`);
 
-              io.emit('emergency-status-updated', {
-                emergencyId: emergency._id,
-                newStatus: 'resolved'
+            // Wait 3 seconds before resolving (optional)
+            setTimeout(async () => {
+              amb.status = 'available';
+              amb.currentEmergency = null;
+              amb.destination = null;
+              await amb.save();
+
+              if (emergency) {
+                emergency.status = 'resolved';
+                await emergency.save();
+
+                io.emit('emergency-status-updated', {
+                  emergencyId: emergency._id,
+                  newStatus: 'resolved'
+                });
+              }
+
+              const hospital = await Hospital.findById(amb.destination?.hospitalId);
+              if (hospital && hospital.load < 95) {
+                hospital.load += 5;
+                await hospital.save();
+                io.emit('hospitalUpdate', hospital);
+              }
+
+              io.emit('ambulance-status-updated', {
+                ambulanceId: amb._id,
+                ambulance_id: amb.ambulance_id,
+                newStatus: 'available'
               });
-            }
 
-            // ✅ Update hospital load
-            const hospital = await Hospital.findById(hospitalId);
-            if (hospital && hospital.load < 95) {
-              hospital.load += 5;
-              await hospital.save();
-              io.emit('hospitalUpdate', hospital);
-            }
-
-            console.log(`✅ Ambulance ${amb.ambulance_id} completed transport and is now AVAILABLE`);
+              console.log(`✅ Ambulance ${amb.ambulance_id} completed transport and is now AVAILABLE`);
+            }, 3000);
           }
 
           updatedAmbulances.push({
@@ -164,18 +180,16 @@ const startAmbulanceTracking = () => {
           continue;
         }
 
-        // 🚑 Move towards destination
         const newLocation = moveTowards(amb.currentLocation, destination);
         amb.currentLocation = newLocation;
         await amb.save();
 
-        // === Calculate speed ===
         const newLat = newLocation.lat;
         const newLng = newLocation.lng;
         const newTime = Date.now();
-        const distMoved = calculateDistance(oldLat, oldLng, newLat, newLng);
-        const timeDiff = (newTime - oldTime) / 1000; // in seconds
-        const speed = timeDiff > 0 ? (distMoved / (timeDiff / 3600)) : 0;
+        const movedDist = calculateDistance(oldLat, oldLng, newLat, newLng);
+        const timeSec = (newTime - oldTime) / 1000;
+        const speed = timeSec > 0 ? (movedDist / (timeSec / 3600)) : 0;
 
         io.emit('ambulance-location-updated', {
           ambulanceId: amb._id,

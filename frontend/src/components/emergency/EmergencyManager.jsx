@@ -29,7 +29,7 @@ const EmergencyManager = () => {
     console.log('📦 Raw Emergencies:', data);
 
     const normalize = (s) => (s || '').toLowerCase().trim();
-    const activeStatuses = ['pending', 'dispatched', 'arrived_at_emergency', 'transporting'];
+    const activeStatuses = ['pending', 'dispatched', 'arrived_at_emergency', 'transporting','arrived_at_hospital' ];
 
     if (Array.isArray(data.data)) {
       data.data.forEach(e => console.log(`- ${e.status}`));
@@ -42,7 +42,7 @@ const EmergencyManager = () => {
       });
 
       const resolved = data.data.filter(e => normalize(e.status) === 'resolved');
-
+      //console.log("resolved emergencies:",resolved);
       setPendingEmergencies(pending);
       setResolvedEmergencies(resolved);
 
