@@ -9,7 +9,6 @@ import incidentImg from '../../assets/incident.png';
 import { fetchHospitals } from '../../services/hospitalService';
 import MapControls from './MapControls';
 
-// Custom marker icons
 const ambulanceIcon = new L.Icon({
   iconUrl: ambulanceImg,
   iconSize: [40, 40],
@@ -40,23 +39,43 @@ const MapView = () => {
   const [filters, setFilters] = useState({
     available: true,
     busy: true,
+    dispatched: true,
+    arrived_at_emergency: true,
+    transporting: true,
     hospitals: true,
     incidents: true,
   });
 
   const markerRefs = useRef({});
 
-  useEffect(() => {
-    const fetchActiveDispatches = async () => {
-      try {
-        const res = await fetch("http://localhost:5000/api/dispatch/active");
-        const data = await res.json();
-        if (Array.isArray(data)) setDispatches(data);
-      } catch (err) {
-        console.error("❌ Error fetching active dispatches:", err.message);
+  // 🚑 Fetch dispatches every 5 seconds
+  const fetchActiveDispatches = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/api/dispatch/active");
+      const result = await res.json();
+      if (Array.isArray(result.dispatches)) {
+        const formatted = result.dispatches.map(d => ({
+          ambulanceId: d.ambulance?.id,
+          status: d.status,
+          estimatedArrival: d.dispatchTime || null,
+          ambulanceLat: d.ambulance?.currentLocation?.lat,
+          ambulanceLng: d.ambulance?.currentLocation?.lng,
+          emergencyLat: d.emergency?.location?.lat,
+          emergencyLng: d.emergency?.location?.lng,
+          hospitalLat: d.hospital?.location?.lat,
+          hospitalLng: d.hospital?.location?.lng,
+        }));
+        setDispatches(formatted);
       }
-    };
+    } catch (err) {
+      console.error("❌ Error fetching active dispatches:", err.message);
+    }
+  };
+
+  useEffect(() => {
     fetchActiveDispatches();
+    const interval = setInterval(fetchActiveDispatches, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -89,104 +108,14 @@ const MapView = () => {
         const result = await res.json();
         const emergencies = Array.isArray(result.data) ? result.data : [];
         const filtered = emergencies.filter((e) =>
-          ["pending", "dispatched"].includes(e.status)
+          ['pending', 'dispatched', 'arrived_at_emergency', 'transporting'].includes(e.status)
         );
-        const formatted = filtered.map((e) => ({
-          lat: e.location.lat,
-          lng: e.location.lng,
-          type: e.category,
-          severity: e.priority,
-          time: e.timestamp,
-        }));
-        setIncidents(formatted);
+        setIncidents(filtered);
       } catch (err) {
         console.error("❌ Error fetching emergencies:", err.message);
       }
     };
     fetchEmergencies();
-  }, []);
-
-  // Socket.IO Listeners
-  useEffect(() => {
-    const handleAmbulanceLocationUpdate = (data) => {
-      setAmbulances(data);
-    };
-
-    const handleAmbulanceStatusUpdate = (data) => {
-      setAmbulances((prev) =>
-        prev.map((a) =>
-          a.id === data.ambulanceId ? { ...a, status: data.newStatus } : a
-        )
-      );
-    };
-
-    const handleAmbulanceLocationSingle = (data) => {
-      setAmbulances((prev) =>
-        prev.map((a) =>
-          a.id === data.ambulanceId
-            ? { ...a, lat: data.location.lat, lng: data.location.lng }
-            : a
-        )
-      );
-    };
-
-    const handleHospitalUpdate = (data) => {
-      setHospitals((prev) => {
-        const exists = prev.some((h) => h.hospital_id === data.hospital_id);
-        return exists
-          ? prev.map((h) => (h.hospital_id === data.hospital_id ? data : h))
-          : [...prev, data];
-      });
-    };
-
-    const handleIncidentReported = (data) => {
-      setIncidents((prev) => [...prev, data]);
-    };
-
-    const handleEmergencyStatusUpdated = (data) => {
-      if (data.newStatus === 'resolved') {
-        setIncidents((prev) =>
-          prev.filter((inc) => inc._id !== data.emergencyId)
-        );
-      }
-    };
-
-    const handleAmbulanceDispatched = (data) => {
-      setDispatches((prev) => {
-        const updated = prev.filter((d) => d.ambulanceId !== data.ambulanceId);
-        return [...updated, data];
-      });
-    };
-
-    const handleDispatchCompleted = (data) => {
-      setDispatches((prev) =>
-        prev.filter((d) => d.ambulanceId !== data.ambulanceId)
-      );
-    };
-
-    socket.on('ambulanceLocationUpdate', handleAmbulanceLocationUpdate);
-    socket.on('ambulance-status-updated', handleAmbulanceStatusUpdate);
-    socket.on('ambulance-location-updated', handleAmbulanceLocationSingle);
-    socket.on('hospitalUpdate', handleHospitalUpdate);
-    socket.on('incidentReported', handleIncidentReported);
-    socket.on('emergency-status-updated', handleEmergencyStatusUpdated);
-    socket.on('ambulanceDispatched', handleAmbulanceDispatched);
-    socket.on('ambulance-dispatched', handleAmbulanceDispatched);
-    socket.on('dispatchCompleted', handleDispatchCompleted);
-    socket.on('dispatchCancelled', handleDispatchCompleted);
-
-    return () => {
-      socket.off('ambulanceLocationUpdate', handleAmbulanceLocationUpdate);
-      socket.off('ambulance-status-updated', handleAmbulanceStatusUpdate);
-      socket.off('ambulance-location-updated', handleAmbulanceLocationSingle);
-      socket.off('hospitalUpdate', handleHospitalUpdate);
-      socket.off('incidentReported', handleIncidentReported);
-      socket.off('emergency-status-updated', handleEmergencyStatusUpdated);
-      socket.off('ambulanceDispatched', handleAmbulanceDispatched);
-      socket.off('ambulance-dispatched', handleAmbulanceDispatched);
-      socket.off('dispatchCompleted', handleDispatchCompleted);
-      socket.off('dispatchCancelled', handleDispatchCompleted);
-    };
   }, []);
 
   useEffect(() => {
@@ -197,6 +126,7 @@ const MapView = () => {
     loadHospitals();
   }, []);
 
+  // ⏱ ETA countdown logic
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
@@ -213,26 +143,70 @@ const MapView = () => {
     return () => clearInterval(interval);
   }, [dispatches]);
 
+  // 🔌 Socket listeners
   useEffect(() => {
-    ambulances.forEach((amb) => {
-      const ref = markerRefs.current[amb.id];
-      if (ref) {
-        ref.setLatLng([amb.lat, amb.lng]);
+   const handleAmbulanceLocationUpdate = (data) => {
+  setAmbulances((prev) => {
+    const updatedIds = data.map((a) => a.id);
+    const preserved = prev.filter((a) => !updatedIds.includes(a.id));
+    return [...preserved, ...data];
+  });
+};
+
+    const handleAmbulanceStatusUpdate = (data) => {
+      setAmbulances((prev) =>
+        prev.map((a) =>
+          a.id === data.ambulanceId ? { ...a, status: data.newStatus } : a
+        )
+      );
+    };
+    const handleAmbulanceLocationSingle = (data) => {
+      setAmbulances((prev) =>
+        prev.map((a) =>
+          a.id === data.ambulanceId
+            ? { ...a, lat: data.location.lat, lng: data.location.lng }
+            : a
+        )
+      );
+    };
+    const handleHospitalUpdate = (data) => {
+      setHospitals((prev) => {
+        const exists = prev.some((h) => h.hospital_id === data.hospital_id);
+        return exists
+          ? prev.map((h) => (h.hospital_id === data.hospital_id ? data : h))
+          : [...prev, data];
+      });
+    };
+    const handleIncidentReported = (data) => setIncidents((prev) => [...prev, data]);
+    const handleEmergencyStatusUpdated = (data) => {
+      if (data.newStatus === 'resolved') {
+        setIncidents((prev) => prev.filter((e) => e._id !== data.emergencyId));
       }
-    });
-  }, [ambulances]);
+    };
+
+    socket.on('ambulanceLocationUpdate', handleAmbulanceLocationUpdate);
+    socket.on('ambulance-status-updated', handleAmbulanceStatusUpdate);
+    socket.on('ambulance-location-updated', handleAmbulanceLocationSingle);
+    socket.on('hospitalUpdate', handleHospitalUpdate);
+    socket.on('incidentReported', handleIncidentReported);
+    socket.on('emergency-status-updated', handleEmergencyStatusUpdated);
+
+    return () => {
+      socket.off('ambulanceLocationUpdate', handleAmbulanceLocationUpdate);
+      socket.off('ambulance-status-updated', handleAmbulanceStatusUpdate);
+      socket.off('ambulance-location-updated', handleAmbulanceLocationSingle);
+      socket.off('hospitalUpdate', handleHospitalUpdate);
+      socket.off('incidentReported', handleIncidentReported);
+      socket.off('emergency-status-updated', handleEmergencyStatusUpdated);
+    };
+  }, []);
 
   const getPolylineStyle = (dispatch) => {
-    const baseStyle = { weight: 4, opacity: 0.8 };
+    const baseStyle = { weight: 4, opacity: 0.9 };
     switch (dispatch.status) {
-      case 'dispatched':
-        return { ...baseStyle, color: '#ff4444', dashArray: '10, 5' };
-      case 'en_route_to_hospital':
-        return { ...baseStyle, color: '#ff8800', dashArray: '15, 5' };
-      case 'arrived_at_emergency':
-        return { ...baseStyle, color: '#ffaa00', dashArray: '20, 5' };
-      default:
-        return { ...baseStyle, color: '#888888', dashArray: '5, 5' };
+      case 'dispatched': return { ...baseStyle, color: '#ff4444' };
+      case 'transporting': return { ...baseStyle, color: '#ffaa00' };
+      default: return { ...baseStyle, color: '#666' };
     }
   };
 
@@ -249,11 +223,10 @@ const MapView = () => {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
+        {/* Ambulance Markers */}
         {ambulances.map((amb) => {
-          if (
-            (amb.status === 'available' && !filters.available) ||
-            (amb.status === 'busy' && !filters.busy)
-          ) return null;
+          const visible = filters[amb.status];
+          if (!visible) return null;
 
           return (
             <Marker
@@ -273,6 +246,7 @@ const MapView = () => {
           );
         })}
 
+        {/* Hospital Markers */}
         {filters.hospitals && hospitals.map((hos) => (
           <Marker
             key={hos.hospital_id}
@@ -287,30 +261,31 @@ const MapView = () => {
           </Marker>
         ))}
 
-        {filters.incidents && incidents.map((inc, idx) => (
-          <Marker key={idx} position={[inc.lat, inc.lng]} icon={incidentIcon}>
+        {/* Incident Markers */}
+        {filters.incidents && incidents.map((e) => (
+          <Marker
+            key={e._id}
+            position={[e.location.lat, e.location.lng]}
+            icon={incidentIcon}
+          >
             <Popup>
-              🚨 <b>Incident</b><br />
-              Type: {inc.type || 'Unknown'}<br />
-              Severity: {inc.severity || 'Moderate'}
+              <strong>{e.patientName}</strong><br />
+              Status: {e.status}
             </Popup>
           </Marker>
         ))}
 
+        {/* Dispatch Polylines */}
         {dispatches.map((d, index) => {
           const eta = etaCountdowns[d.ambulanceId] || null;
           const polylineStyle = getPolylineStyle(d);
           const routePath = [];
 
-          if (d.ambulanceLocation) {
-            routePath.push([d.ambulanceLocation.lat, d.ambulanceLocation.lng]);
-          }
-          if (d.emergencyLocation && ['dispatched'].includes(d.status)) {
-            routePath.push([d.emergencyLocation.lat, d.emergencyLocation.lng]);
-          }
-          if (d.hospitalLocation) {
-            routePath.push([d.hospitalLocation.lat, d.hospitalLocation.lng]);
-          }
+          if (d.ambulanceLat && d.ambulanceLng) routePath.push([d.ambulanceLat, d.ambulanceLng]);
+          if (['dispatched', 'arrived_at_emergency'].includes(d.status) && d.emergencyLat && d.emergencyLng)
+            routePath.push([d.emergencyLat, d.emergencyLng]);
+          if (d.status === 'transporting' && d.hospitalLat && d.hospitalLng)
+            routePath.push([d.hospitalLat, d.hospitalLng]);
 
           return (
             <div key={`dispatch-${d.ambulanceId}-${index}`}>
@@ -321,8 +296,8 @@ const MapView = () => {
                 <Marker
                   position={
                     ['dispatched'].includes(d.status)
-                      ? [d.emergencyLocation.lat, d.emergencyLocation.lng]
-                      : [d.hospitalLocation.lat, d.hospitalLocation.lng]
+                      ? [d.emergencyLat, d.emergencyLng]
+                      : [d.hospitalLat, d.hospitalLng]
                   }
                   icon={L.divIcon({
                     className: 'leaflet-eta-label',

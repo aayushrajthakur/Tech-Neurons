@@ -81,6 +81,18 @@ const startAmbulanceTracking = () => {
             amb.status = 'busy';
             await amb.save();
 
+            // ✅ Update emergency status to valid enum
+            const emergency = await Emergency.findById(amb.currentEmergency);
+            if (emergency) {
+              emergency.status = 'arrived_at_emergency';
+              await emergency.save();
+
+              io.emit('emergency-status-updated', {
+                emergencyId: emergency._id,
+                newStatus: 'arrived_at_emergency'
+              });
+            }
+
             io.emit('ambulance-status-updated', {
               ambulanceId: amb._id,
               ambulance_id: amb.ambulance_id,
@@ -116,7 +128,7 @@ const startAmbulanceTracking = () => {
               speed: 0
             });
 
-            // Resolve emergency
+            // ✅ Resolve emergency
             const emergency = await Emergency.findById(emergencyId);
             if (emergency) {
               emergency.status = 'resolved';
@@ -128,7 +140,7 @@ const startAmbulanceTracking = () => {
               });
             }
 
-            // Update hospital load
+            // ✅ Update hospital load
             const hospital = await Hospital.findById(hospitalId);
             if (hospital && hospital.load < 95) {
               hospital.load += 5;
@@ -182,7 +194,7 @@ const startAmbulanceTracking = () => {
           speed: parseFloat(speed.toFixed(1))
         });
 
-        console.log(`🚑 Moving ambulance ${amb.ambulance_id} (${amb.status}) at ${speed.toFixed(1)} km/h`);
+        console.log(`🚑 Moving ambulance ${amb.ambulance_id} (${amb.status})`);
       }
 
       if (updatedAmbulances.length > 0) {

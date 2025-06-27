@@ -17,7 +17,6 @@ const EmergencyManagerView = ({
   onCompleteEmergency,
   onUpdateAmbulanceLocation
 }) => {
-  // Error display
   if (error) {
     return (
       <div className="emergency-manager-view px-6 py-4 max-w-6xl mx-auto">
@@ -34,6 +33,7 @@ const EmergencyManagerView = ({
       </div>
     );
   }
+ //console.log("👀 Received pendingEmergencies:", pendingEmergencies);
 
   return (
     <div className="emergency-manager-view px-6 py-4 max-w-6xl mx-auto">
@@ -48,7 +48,7 @@ const EmergencyManagerView = ({
         </button>
       </div>
 
-      {/* Statistics Dashboard */}
+      {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white p-4 rounded shadow border-l-4 border-blue-500">
           <p className="text-sm text-gray-600">Active Dispatches</p>
@@ -76,7 +76,7 @@ const EmergencyManagerView = ({
         </div>
       </div>
 
-      {/* Loading Indicator */}
+      {/* Loading Spinner */}
       {loading && (
         <div className="flex justify-center items-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -84,7 +84,7 @@ const EmergencyManagerView = ({
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabbed View */}
       <Tabs defaultValue="dispatches" className="w-full">
         <TabsList className="grid w-full grid-cols-3 mb-4">
           <TabsTrigger value="dispatches">
@@ -113,7 +113,7 @@ const EmergencyManagerView = ({
           </TabsTrigger>
         </TabsList>
 
-        {/* Dispatches Tab */}
+        {/* Dispatches */}
         <TabsContent value="dispatches" className="space-y-4">
           {dispatches.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
@@ -135,27 +135,44 @@ const EmergencyManagerView = ({
           )}
         </TabsContent>
 
-        {/* Pending Emergencies Tab */}
+        {/* Pending Emergencies with Grouped Statuses */}
         <TabsContent value="pending" className="space-y-4">
+          
           {pendingEmergencies.length === 0 ? (
             <div className="text-center text-gray-500 py-8">
               <div className="text-4xl mb-2">🆘</div>
               <p>No pending emergencies</p>
             </div>
           ) : (
-            pendingEmergencies.map((emergency) => (
-              <EmergencyCard
-                key={emergency._id}
-                emergency={emergency}
-                onUpdate={onRefreshData}
-                onDispatchEmergency={onDispatchEmergency}
-                isPending={true}
-              />
-            ))
+            ['pending', 'dispatched', 'arrived_at_emergency', 'transporting'].map((statusKey) => {
+              const group = pendingEmergencies.filter((e) => e.status === statusKey);
+              console.log("Grouped status:", statusKey, group); // 🔍 Debug line
+
+              if (group.length === 0) return null;
+
+              return (
+                <div key={statusKey} className="mb-6">
+                  <h3 className="text-lg font-semibold capitalize mb-2">
+                    {statusKey.replace(/_/g, ' ')} ({group.length})
+                  </h3>
+                  <div className="space-y-4">
+                    {group.map((emergency) => (
+                      <EmergencyCard
+                        key={emergency._id}
+                        emergency={emergency}
+                        onUpdate={onRefreshData}
+                        onDispatchEmergency={onDispatchEmergency}
+                        isPending={true}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })
           )}
         </TabsContent>
 
-        {/* Resolved Emergencies Tab */}
+        {/* Resolved Emergencies */}
         <TabsContent value="resolved" className="space-y-4">
           {resolvedEmergencies.length === 0 ? (
             <div className="text-center text-gray-500 py-8">

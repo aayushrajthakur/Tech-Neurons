@@ -237,9 +237,10 @@ exports.dispatchEmergency = async (req, res) => {
 };
 
 // Get all active dispatches
+// Get all active dispatches
 exports.getActiveDispatches = async (req, res) => {
   try {
-    // Find all emergencies that are dispatched (not pending or resolved)
+    // Find all emergencies that are dispatched
     const activeEmergencies = await Emergency.find({ 
       status: "dispatched" 
     })
@@ -255,15 +256,17 @@ exports.getActiveDispatches = async (req, res) => {
       if (emergency.assignedAmbulance) {
         // Get hospital info from ambulance destination
         let hospital = null;
-        if (emergency.assignedAmbulance.destination && emergency.assignedAmbulance.destination.hospitalId) {
+        if (emergency.assignedAmbulance.destination?.hospitalId) {
           hospital = await Hospital.findById(emergency.assignedAmbulance.destination.hospitalId);
         }
 
         dispatches.push({
-          emergencyId: emergency._id,
+          emergencyId: emergency._id, // main reference
           status: emergency.status,
           dispatchTime: emergency.timestamp,
+
           emergency: {
+            _id: emergency._id,
             id: emergency._id,
             patientName: emergency.patientName,
             contactNumber: emergency.contactNumber,
@@ -273,14 +276,18 @@ exports.getActiveDispatches = async (req, res) => {
             status: emergency.status,
             timestamp: emergency.timestamp
           },
+
           ambulance: {
+            _id: emergency.assignedAmbulance._id,
             id: emergency.assignedAmbulance._id,
             ambulance_id: emergency.assignedAmbulance.ambulance_id,
             driverName: emergency.assignedAmbulance.driverName,
             currentLocation: emergency.assignedAmbulance.currentLocation,
             status: emergency.assignedAmbulance.status
           },
+
           hospital: hospital ? {
+            _id: hospital._id,
             id: hospital._id,
             hospital_id: hospital.hospital_id,
             name: hospital.name,
@@ -295,7 +302,7 @@ exports.getActiveDispatches = async (req, res) => {
     res.json({
       success: true,
       count: dispatches.length,
-      dispatches: dispatches
+      dispatches
     });
 
   } catch (error) {
@@ -394,9 +401,14 @@ exports.markArrivedAtEmergency = async (req, res) => {
 
     // Update ambulance status to busy (at emergency location)
     await Ambulance.findByIdAndUpdate(
-      emergency.assignedAmbulance._id,
-      { status: "busy" }
-    );
+  emergency.assignedAmbulance._id,
+  { status: "busy" }
+);
+
+await Emergency.findByIdAndUpdate(
+  emergency._id,
+  { status: "arrived_at_emergency" }
+);
 
     const io = getSocketInstance();
     if (io) {
@@ -541,27 +553,33 @@ exports.getDispatchStats = async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const stats = {
-      totalEmergencies: await Emergency.countDocuments(),
-      pendingEmergencies: await Emergency.countDocuments({ status: "pending" }),
-      activeDispatches: await Emergency.countDocuments({ status: "dispatched" }),
-      resolvedToday: await Emergency.countDocuments({
-        status: "resolved",
-        timestamp: { $gte: today }
-      }),
-      totalAmbulances: await Ambulance.countDocuments(),
-      availableAmbulances: await Ambulance.countDocuments({ status: "available" }),
-      busyAmbulances: await Ambulance.countDocuments({ 
-        status: { $in: ["dispatched", "busy", "transporting"] } 
-      }),
-      totalHospitals: await Hospital.countDocuments(),
-      averageHospitalLoad: await calculateAverageHospitalLoad(),
-      emergencyBreakdown: await getEmergencyBreakdown()
-    };
+    const totalEmergencies = await Emergency.countDocuments();
+    const pendingEmergencies = await Emergency.countDocuments({ status: "pending" });
+    const activeDispatches = await Emergency.countDocuments({ status: "dispatched" });
+    const resolvedToday = await Emergency.countDocuments({ status: "resolved", timestamp: { $gte: today } });
+
+    const totalAmbulances = await Ambulance.countDocuments();
+    const availableAmbulances = await Ambulance.countDocuments({ status: "available" });
+    const busyAmbulances = await Ambulance.countDocuments({ status: { $in: ["dispatched", "busy", "transporting"] } });
+
+    const totalHospitals = await Hospital.countDocuments();
+    const averageHospitalLoad = await calculateAverageHospitalLoad();
+    const emergencyBreakdown = await getEmergencyBreakdown();
 
     res.json({
       success: true,
-      stats,
+      stats: {
+        totalEmergencies,
+        pendingEmergencies,
+        activeDispatches,
+        resolvedToday,
+        totalAmbulances,
+        availableAmbulances,
+        busyAmbulances,
+        totalHospitals,
+        averageHospitalLoad,
+        emergencyBreakdown
+      },
       timestamp: new Date()
     });
 
@@ -573,6 +591,7 @@ exports.getDispatchStats = async (req, res) => {
     });
   }
 };
+
 
 // Helper function to calculate average hospital load
 const calculateAverageHospitalLoad = async () => {

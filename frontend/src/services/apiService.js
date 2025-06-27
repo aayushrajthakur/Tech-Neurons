@@ -31,7 +31,7 @@ class ApiService {
 
   // --- Dispatch API ---
   async dispatchEmergency(emergencyId) {
-    return this.request(`/dispatch/${emergencyId}`, { method: 'POST' });
+    return this.request(`/dispatch/emergency/${emergencyId}/dispatch`, { method: 'POST' });
   }
 
   async getActiveDispatches() {
@@ -42,30 +42,53 @@ class ApiService {
     return this.request('/dispatch/stats');
   }
 
+  // ✅ ADDED: Missing method for getting emergency details
+  async getEmergencyDetails(emergencyId) {
+    return this.request(`/dispatch/emergency/${emergencyId}`);
+  }
+
+  // ✅ FIXED: Use 'lat' and 'lng' to match controller expectations
   async updateAmbulanceLocation(ambulanceId, location) {
     return this.request(`/dispatch/ambulance/${ambulanceId}/location`, {
       method: 'PUT',
-      body: JSON.stringify(location),
+      body: JSON.stringify({
+        lat: location.lat || location.latitude,
+        lng: location.lng || location.longitude
+      }),
     });
   }
 
   async markEmergencyArrived(emergencyId) {
-    return this.request(`/dispatch/emergency/${emergencyId}/arrived`, {
-      method: 'PUT',
-    });
-  }
+  const res = await this.request(`/dispatch/emergency/${emergencyId}/arrived`, {
+    method: 'PUT',
+  });
+  return {
+    success: res.success,
+    message: res.message,
+    data: res.data || null, // ⬅️ dispatch object
+  };
+}
+async markTransporting(emergencyId) {
+  const res = await this.request(`/dispatch/emergency/${emergencyId}/transporting`, {
+    method: 'PUT',
+  });
+  return {
+    success: res.success,
+    message: res.message,
+    data: res.data || null,
+  };
+}
 
-  async markTransporting(emergencyId) {
-    return this.request(`/dispatch/emergency/${emergencyId}/transporting`, {
-      method: 'PUT',
-    });
-  }
-
-  async completeEmergency(emergencyId) {
-    return this.request(`/dispatch/emergency/${emergencyId}/complete`, {
-      method: 'PUT',
-    });
-  }
+async completeEmergency(emergencyId) {
+  const res = await this.request(`/dispatch/emergency/${emergencyId}/complete`, {
+    method: 'PUT',
+  });
+  return {
+    success: res.success,
+    message: res.message,
+    data: res.data || null,
+  };
+}
 
   // --- Emergency API ---
   async getEmergencies(status = null) {
@@ -132,33 +155,44 @@ class ApiService {
   }
 
   // --- Simulation ---
+  // ✅ FIXED: Use 'lat' and 'lng' consistently
   async simulateEmergency(emergencyType = 'medical', priority = 'medium') {
     const baseLatitude = 28.7041;
     const baseLongitude = 77.1025;
 
     const emergencyData = {
+      patientName: `Test Patient ${Math.floor(Math.random() * 1000)}`,
+      contactNumber: '+91-9999999999',
       category: emergencyType,
-      priority,
+      priority: priority.toUpperCase(), // ✅ FIXED: Controller expects uppercase
       location: {
-        latitude: baseLatitude + (Math.random() - 0.5) * 0.1,
-        longitude: baseLongitude + (Math.random() - 0.5) * 0.1,
+        lat: baseLatitude + (Math.random() - 0.5) * 0.1,    // ✅ FIXED: Use 'lat'
+        lng: baseLongitude + (Math.random() - 0.5) * 0.1,   // ✅ FIXED: Use 'lng'
         address: `Test Emergency Location ${Math.floor(Math.random() * 1000)}`
       },
-      description: `Simulated ${emergencyType} emergency with ${priority} priority`,
-      reporterName: 'Test Reporter',
-      reporterPhone: '+91-9999999999'
+      description: `Simulated ${emergencyType} emergency with ${priority} priority`
     };
 
     return this.createEmergency(emergencyData);
   }
 
+  // ✅ FIXED: Handle location property names correctly
   async simulateAmbulanceMovement(ambulanceId) {
     const ambulance = await this.getAmbulanceById(ambulanceId);
     if (ambulance.success && ambulance.ambulance?.currentLocation) {
-      const { latitude, longitude } = ambulance.ambulance.currentLocation;
+      const currentLoc = ambulance.ambulance.currentLocation;
+      
+      // Handle both possible property names
+      const lat = currentLoc.lat || currentLoc.latitude;
+      const lng = currentLoc.lng || currentLoc.longitude;
+      
+      if (!lat || !lng) {
+        throw new Error('Invalid location data for ambulance');
+      }
+
       const newLocation = {
-        latitude: latitude + (Math.random() - 0.5) * 0.01,
-        longitude: longitude + (Math.random() - 0.5) * 0.01
+        lat: lat + (Math.random() - 0.5) * 0.01,    // ✅ FIXED: Use 'lat'
+        lng: lng + (Math.random() - 0.5) * 0.01     // ✅ FIXED: Use 'lng'
       };
 
       return this.updateAmbulanceLocation(ambulanceId, newLocation);

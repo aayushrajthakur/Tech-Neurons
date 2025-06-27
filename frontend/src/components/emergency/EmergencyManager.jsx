@@ -24,30 +24,42 @@ const EmergencyManager = () => {
   };
 
   const fetchEmergencies = async () => {
-    try {
-      const data = await apiService.getEmergencies();
-      if (data.success && Array.isArray(data.data)) {
-        const pending = data.data.filter(e => e.status === 'pending');
-        const resolved = data.data.filter(e => e.status === 'resolved');
-        setPendingEmergencies(pending);
-        setResolvedEmergencies(resolved);
-      } else if (Array.isArray(data.data)) {
-        // Handle case where success field might not be present
-        const pending = data.data.filter(e => e.status === 'pending');
-        const resolved = data.data.filter(e => e.status === 'resolved');
-        setPendingEmergencies(pending);
-        setResolvedEmergencies(resolved);
-      } else {
-        console.warn("Unexpected emergency data format:", data);
-        setPendingEmergencies([]);
-        setResolvedEmergencies([]);
-      }
-    } catch (error) {
-      console.error('Emergency fetch error:', error);
-      setError('Failed to fetch emergencies');
-    }
-  };
+  try {
+    const data = await apiService.getEmergencies();
+    console.log('📦 Raw Emergencies:', data);
 
+    const normalize = (s) => (s || '').toLowerCase().trim();
+    const activeStatuses = ['pending', 'dispatched', 'arrived_at_emergency', 'transporting'];
+
+    if (Array.isArray(data.data)) {
+      data.data.forEach(e => console.log(`- ${e.status}`));
+
+      const pending = data.data.filter(e => {
+        const normalized = normalize(e.status);
+        const isMatch = activeStatuses.includes(normalized);
+        console.log(`🔍 Emergency ${e._id}: status="${e.status}" → normalized="${normalized}" → match=${isMatch}`);
+        return isMatch;
+      });
+
+      const resolved = data.data.filter(e => normalize(e.status) === 'resolved');
+
+      setPendingEmergencies(pending);
+      setResolvedEmergencies(resolved);
+
+      // console.log("🧪 Filtered Pending Emergencies:", pending);
+      // console.log("✅ Filtered Resolved Emergencies:", resolved);
+    } else {
+      console.warn("⚠️ Unexpected emergency data format:", data);
+      setPendingEmergencies([]);
+      setResolvedEmergencies([]);
+    }
+  } catch (error) {
+    console.error('Emergency fetch error:', error);
+    setError('Failed to fetch emergencies');
+  }
+};
+
+  
   const fetchStats = async () => {
     try {
       const data = await apiService.getDispatchStats();

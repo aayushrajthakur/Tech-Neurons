@@ -101,7 +101,12 @@ exports.updateEmergencyStatus = async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  if (!["pending", "dispatched", "resolved"].includes(status)) {
+  if (!["pending",
+      "dispatched",
+      "arrived_at_emergency",
+      "transporting",
+      "arrived_at_hospital",
+      "resolved"].includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
   }
 
