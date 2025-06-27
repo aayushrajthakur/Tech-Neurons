@@ -36,11 +36,11 @@ const EmergencyCard = ({ emergency, onDispatchSuccess }) => {
       setIsDispatching(true);
       setDispatchError("");
       
-      console.log(`🚑 Dispatching ambulance for emergency ${_id}`);
       
       const response = await dispatchAmbulance(_id);
       
       if (response.success) {
+        console.log(`🚑 Dispatching ambulance for emergency ${_id}`);
         console.log("✅ Dispatch successful:", response);
         
         // Call success callback to refresh data

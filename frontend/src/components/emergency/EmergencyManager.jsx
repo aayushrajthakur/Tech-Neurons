@@ -1,148 +1,267 @@
-// src/pages/EmergencyManager.jsx
-import React, { useEffect, useState } from "react";
-import { getActiveDispatches } from "../../services/dispatchService";
-import { getEmergencies } from "../../services/emergencyService";
-import { socket } from "../../services/socket";
-import EmergencyManagerView from "../../components/cards/EmergencyManagerView";
+import React, { useEffect, useState } from 'react';
+import { socket } from '../../services/socket';
+import apiService from '../../services/apiService';
+import EmergencyManagerView from '../cards/EmergencyManagerView';
 
 const EmergencyManager = () => {
   const [dispatches, setDispatches] = useState([]);
   const [pendingEmergencies, setPendingEmergencies] = useState([]);
   const [resolvedEmergencies, setResolvedEmergencies] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({});
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // 🚑 Fetch active ambulance dispatches
   const fetchDispatches = async () => {
     try {
-      const res = await getActiveDispatches();
-      setDispatches(res.data);
-      setError(null); // Clear any previous errors
-    } catch (err) {
-      console.error("Error fetching dispatches:", err.message);
-      setError("Failed to fetch dispatches");
+      const data = await apiService.getActiveDispatches();
+      if (data.success) {
+        setDispatches(data.dispatches || []);
+      }
+    } catch (error) {
+      console.error('Dispatch fetch error:', error);
+      setError('Failed to fetch active dispatches');
     }
   };
 
-  // 🩺 Fetch pending and resolved emergencies together
   const fetchEmergencies = async () => {
     try {
-      const res = await getEmergencies();
-      const all = res.data;
-      setPendingEmergencies(all.filter((e) => e.status === "pending"));
-      setResolvedEmergencies(all.filter((e) => e.status === "resolved"));
-      setError(null); // Clear any previous errors
-    } catch (err) {
-      console.error("Error fetching emergencies:", err.message);
-      setError("Failed to fetch emergencies");
+      const data = await apiService.getEmergencies();
+      if (data.success && Array.isArray(data.data)) {
+        const pending = data.data.filter(e => e.status === 'pending');
+        const resolved = data.data.filter(e => e.status === 'resolved');
+        setPendingEmergencies(pending);
+        setResolvedEmergencies(resolved);
+      } else if (Array.isArray(data.data)) {
+        // Handle case where success field might not be present
+        const pending = data.data.filter(e => e.status === 'pending');
+        const resolved = data.data.filter(e => e.status === 'resolved');
+        setPendingEmergencies(pending);
+        setResolvedEmergencies(resolved);
+      } else {
+        console.warn("Unexpected emergency data format:", data);
+        setPendingEmergencies([]);
+        setResolvedEmergencies([]);
+      }
+    } catch (error) {
+      console.error('Emergency fetch error:', error);
+      setError('Failed to fetch emergencies');
     }
   };
 
-  // Combined refresh function for manual refresh
-  const handleRefreshData = async () => {
-    setLoading(true);
+  const fetchStats = async () => {
     try {
-      await Promise.all([fetchDispatches(), fetchEmergencies()]);
-    } catch (err) {
-      console.error("Error refreshing data:", err.message);
+      const data = await apiService.getDispatchStats();
+      if (data.success) {
+        setStats(data.stats || {});
+      }
+    } catch (error) {
+      console.error('Stats fetch error:', error);
+      setError('Failed to fetch statistics');
+    }
+  };
+
+  const fetchAllData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await Promise.all([
+        fetchDispatches(),
+        fetchEmergencies(),
+        fetchStats()
+      ]);
+    } catch (error) {
+      console.error('Error fetching all data:', error);
+      setError('Failed to fetch data');
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial data load
-  const loadInitialData = async () => {
-    setLoading(true);
+  // Handle emergency dispatch
+  const handleDispatchEmergency = async (emergencyId) => {
     try {
-      await Promise.all([fetchDispatches(), fetchEmergencies()]);
-    } catch (err) {
-      console.error("Error loading initial data:", err.message);
-      setError("Failed to load initial data");
+      setLoading(true);
+      const result = await apiService.dispatchEmergency(emergencyId);
+      if (result.success) {
+        // Refresh data after successful dispatch
+        await fetchAllData();
+        return { success: true, message: result.message };
+      }
+      return { success: false, message: result.error || 'Dispatch failed' };
+    } catch (error) {
+      console.error('Dispatch emergency error:', error);
+      return { success: false, message: error.message };
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔁 Real-time updates
+  // Handle emergency status updates
+  const handleMarkArrived = async (emergencyId) => {
+    try {
+      const result = await apiService.markEmergencyArrived(emergencyId);
+      if (result.success) {
+        await fetchAllData();
+        return { success: true, message: result.message };
+      }
+      return { success: false, message: result.error };
+    } catch (error) {
+      console.error('Mark arrived error:', error);
+      return { success: false, message: error.message };
+    }
+  };
+
+  const handleMarkTransporting = async (emergencyId) => {
+    try {
+      const result = await apiService.markTransporting(emergencyId);
+      if (result.success) {
+        await fetchAllData();
+        return { success: true, message: result.message };
+      }
+      return { success: false, message: result.error };
+    } catch (error) {
+      console.error('Mark transporting error:', error);
+      return { success: false, message: error.message };
+    }
+  };
+
+  const handleCompleteEmergency = async (emergencyId) => {
+    try {
+      const result = await apiService.completeEmergency(emergencyId);
+      if (result.success) {
+        await fetchAllData();
+        return { success: true, message: result.message };
+      }
+      return { success: false, message: result.error };
+    } catch (error) {
+      console.error('Complete emergency error:', error);
+      return { success: false, message: error.message };
+    }
+  };
+
+  // Handle ambulance location updates
+  const handleUpdateAmbulanceLocation = async (ambulanceId, location) => {
+    try {
+      const result = await apiService.updateAmbulanceLocation(ambulanceId, location);
+      if (result.success) {
+        // Optionally refresh dispatches to show updated location
+        await fetchDispatches();
+        return { success: true, message: result.message };
+      }
+      return { success: false, message: result.error };
+    } catch (error) {
+      console.error('Update ambulance location error:', error);
+      return { success: false, message: error.message };
+    }
+  };
+
+  // Socket event handlers - moved here to avoid duplication
+  const handleDispatchNew = (data) => {
+    console.log('New dispatch:', data);
+    setDispatches(prev => [data, ...prev]);
+    fetchStats(); // Update stats
+  };
+
+  const handleDispatchUpdate = (data) => {
+    console.log('Dispatch updated:', data);
+    setDispatches(prev => prev.map(d => d._id === data._id ? data : d));
+  };
+
+  const handleNewEmergency = (emergency) => {
+    console.log('New emergency:', emergency);
+    if (emergency.status === 'pending') {
+      setPendingEmergencies(prev => [emergency, ...prev]);
+    }
+  };
+
+  const handleEmergencyUpdate = (updated) => {
+    console.log('Emergency updated:', updated);
+    if (updated.status === 'resolved') {
+      setPendingEmergencies(prev => prev.filter(e => e._id !== updated._id));
+      setResolvedEmergencies(prev => [updated, ...prev]);
+    } else {
+      setPendingEmergencies(prev => 
+        prev.map(e => e._id === updated._id ? updated : e)
+      );
+    }
+  };
+
+  const handleEmergencyDeleted = (id) => {
+    console.log('Emergency deleted:', id);
+    setPendingEmergencies(prev => prev.filter(e => e._id !== id));
+    setResolvedEmergencies(prev => prev.filter(e => e._id !== id));
+  };
+
+  const handleAmbulanceLocationUpdate = (data) => {
+    console.log('Ambulance location updated:', data);
+    setDispatches(prev => 
+      prev.map(d => 
+        d.ambulance && d.ambulance._id === data.ambulanceId 
+          ? { ...d, ambulance: { ...d.ambulance, currentLocation: data.location } }
+          : d
+      )
+    );
+  };
+
+  const handleAmbulanceArrivedEmergency = (data) => {
+    console.log('Ambulance arrived at emergency:', data);
+    fetchDispatches();
+    fetchStats();
+  };
+
+  const handleAmbulanceTransporting = (data) => {
+    console.log('Ambulance transporting:', data);
+    fetchDispatches();
+    fetchStats();
+  };
+
+  const handleEmergencyCompleted = (data) => {
+    console.log('Emergency completed:', data);
+    fetchAllData(); // Full refresh when emergency is completed
+  };
+
   useEffect(() => {
-    loadInitialData();
+    fetchAllData();
 
-    // Socket event handlers
-    const handleAmbulanceStatusUpdate = () => {
-      fetchDispatches();
-    };
+    // Socket listeners - only in parent component
+    socket.on('dispatch:new', handleDispatchNew);
+    socket.on('dispatch:updated', handleDispatchUpdate);
+    socket.on('emergency:new', handleNewEmergency);
+    socket.on('emergency:updated', handleEmergencyUpdate);
+    socket.on('emergency:deleted', handleEmergencyDeleted);
+    socket.on('ambulance:location-update', handleAmbulanceLocationUpdate);
+    socket.on('ambulance:arrived-emergency', handleAmbulanceArrivedEmergency);
+    socket.on('ambulance:transporting', handleAmbulanceTransporting);
+    socket.on('emergency:completed', handleEmergencyCompleted);
 
-    const handleAmbulanceLocationUpdate = () => {
-      fetchDispatches();
-    };
-
-    const handleEmergencyStatusUpdate = () => {
-      fetchDispatches();
-      fetchEmergencies();
-    };
-
-    // Register socket listeners
-    socket.on("ambulance-status-updated", handleAmbulanceStatusUpdate);
-    socket.on("ambulanceLocationUpdate", handleAmbulanceLocationUpdate);
-    socket.on("emergency-status-updated", handleEmergencyStatusUpdate);
-
-    // Additional socket events that might be useful
-    socket.on("dispatch:new", fetchDispatches);
-    socket.on("dispatch:updated", fetchDispatches);
-    socket.on("emergency:new", fetchEmergencies);
-    socket.on("emergency:updated", fetchEmergencies);
-    socket.on("emergency:deleted", fetchEmergencies);
-
-    // Cleanup function
     return () => {
-      socket.off("ambulance-status-updated", handleAmbulanceStatusUpdate);
-      socket.off("ambulanceLocationUpdate", handleAmbulanceLocationUpdate);
-      socket.off("emergency-status-updated", handleEmergencyStatusUpdate);
-      socket.off("dispatch:new", fetchDispatches);
-      socket.off("dispatch:updated", fetchDispatches);
-      socket.off("emergency:new", fetchEmergencies);
-      socket.off("emergency:updated", fetchEmergencies);
-      socket.off("emergency:deleted", fetchEmergencies);
+      // Cleanup socket listeners
+      socket.off('dispatch:new', handleDispatchNew);
+      socket.off('dispatch:updated', handleDispatchUpdate);
+      socket.off('emergency:new', handleNewEmergency);
+      socket.off('emergency:updated', handleEmergencyUpdate);
+      socket.off('emergency:deleted', handleEmergencyDeleted);
+      socket.off('ambulance:location-update', handleAmbulanceLocationUpdate);
+      socket.off('ambulance:arrived-emergency', handleAmbulanceArrivedEmergency);
+      socket.off('ambulance:transporting', handleAmbulanceTransporting);
+      socket.off('emergency:completed', handleEmergencyCompleted);
     };
   }, []);
-
-  // Show loading state
-  if (loading && dispatches.length === 0 && pendingEmergencies.length === 0) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading emergency data...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error state
-  if (error && dispatches.length === 0 && pendingEmergencies.length === 0) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="text-red-500 text-4xl mb-4">⚠️</div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Error Loading Data</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={handleRefreshData}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <EmergencyManagerView
       dispatches={dispatches}
       pendingEmergencies={pendingEmergencies}
       resolvedEmergencies={resolvedEmergencies}
-      onRefreshData={handleRefreshData}
+      stats={stats}
+      loading={loading}
+      error={error}
+      onRefreshData={fetchAllData}
+      onDispatchEmergency={handleDispatchEmergency}
+      onMarkArrived={handleMarkArrived}
+      onMarkTransporting={handleMarkTransporting}
+      onCompleteEmergency={handleCompleteEmergency}
+      onUpdateAmbulanceLocation={handleUpdateAmbulanceLocation}
     />
   );
 };

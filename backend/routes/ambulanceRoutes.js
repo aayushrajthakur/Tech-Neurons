@@ -16,5 +16,5 @@ router.put("/:id/location", updateLocation);
 router.patch("/:id/status", updateStatus);
 router.get("/status", getAmbulanceStatus);
 router.patch("/update", updateAmbulanceLocation);
-
+  
 module.exports = router;

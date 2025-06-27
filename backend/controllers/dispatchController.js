@@ -1,519 +1,688 @@
-const Emergency = require("../models/Emergency");
-const Ambulance = require("../models/Ambulance");
+// controllers/dispatchController.js
+
 const Hospital = require("../models/Hospital");
-const { calculateETA } = require("../utils/calculateETA");
+const Ambulance = require("../models/Ambulance");
+const Emergency = require("../models/Emergency");
 const { getSocketInstance } = require('../socket/socketHandler');
 
-// Calculate distance between two coordinates using Haversine formula
+// Helper function to calculate distance between two coordinates (Haversine formula)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371;
+  const R = 6371; // Earth's radius in kilometers
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return R * c;
 };
 
-// Find the nearest available ambulance
-const findNearestAmbulance = async (location) => {
-  const ambulances = await Ambulance.find({ status: 'available' });
-  if (ambulances.length === 0) throw new Error('No available ambulances');
+// Helper function to estimate arrival time
+const estimateArrivalTime = (distance, averageSpeed = 40) => {
+  // Using 40 km/h as average speed considering city traffic and emergency conditions
+  const hours = distance / averageSpeed;
+  const minutes = Math.round(hours * 60);
+  return new Date(Date.now() + minutes * 60000);
+};
 
-  let nearest = null;
-  let minDistance = Infinity;
+// Find best hospital based on proximity, capacity, and specialties
+const findBestHospital = async (emergencyLocation, category = null, priority = "MEDIUM") => {
+  const hospitals = await Hospital.find();
+  if (hospitals.length === 0) throw new Error("No available hospitals found");
 
-  ambulances.forEach(amb => {
-    const dist = calculateDistance(location.lat, location.lng, amb.currentLocation.lat, amb.currentLocation.lng);
-    if (dist < minDistance) {
-      minDistance = dist;
-      nearest = { ambulance: amb, distance: dist };
+  const hospitalScores = hospitals.map(hospital => {
+    const distance = calculateDistance(
+      emergencyLocation.lat,
+      emergencyLocation.lng,
+      hospital.location.lat,
+      hospital.location.lng
+    );
+
+    // Base score is distance
+    let score = distance;
+
+    // Add load penalty (higher load = higher score = less preferred)
+    score += (hospital.load / 10);
+
+    // Reduce score if hospital has relevant specialty
+    if (category && hospital.specialties && hospital.specialties.length > 0) {
+      const hasRelevantSpecialty = hospital.specialties.some(specialty => 
+        specialty.toLowerCase().includes(category.toLowerCase()) ||
+        (category.toLowerCase() === 'medical' && 
+         ['emergency', 'trauma', 'cardiology', 'surgery'].includes(specialty.toLowerCase()))
+      );
+      if (hasRelevantSpecialty) {
+        score -= 2; // Prefer hospitals with relevant specialties
+      }
     }
+
+    // Priority adjustments
+    if (priority === "HIGH") {
+      // For high priority, heavily weight distance over load
+      score = distance * 1.5 + (hospital.load / 20);
+    }
+
+    return { hospital, distance, score };
   });
 
-  return nearest;
+  hospitalScores.sort((a, b) => a.score - b.score);
+  return hospitalScores[0];
 };
 
-// Find the most suitable hospital
-const findBestHospital = async (lat, lng, category, priority) => {
-  console.log(`🏥 Finding hospital for: lat=${lat}, lng=${lng}, category=${category}, priority=${priority}`);
+// Find best available ambulance based on proximity and priority
+const findBestAmbulance = async (emergencyLocation, priority = "MEDIUM") => {
+  const availableAmbulances = await Ambulance.find({ status: "available" });
+  if (availableAmbulances.length === 0) throw new Error("No available ambulances found");
+
+  const ambulanceDistances = availableAmbulances.map(ambulance => {
+    const distance = calculateDistance(
+      emergencyLocation.lat,
+      emergencyLocation.lng,
+      ambulance.currentLocation.lat,
+      ambulance.currentLocation.lng
+    );
+    return { ambulance, distance };
+  });
+
+  // For high priority emergencies, always choose the closest
+  ambulanceDistances.sort((a, b) => a.distance - b.distance);
   
-  const hospitals = await Hospital.find();
-  console.log(`📊 Found ${hospitals.length} hospitals in database`);
-
-  if (hospitals.length === 0) {
-    console.log('❌ No hospitals found in database');
-    return null;
-  }
-
-  // Map general emergency categories to hospital specialties
-  const categoryMapping = {
-    accident: 'trauma',
-    fire: 'burns',
-    general: 'general',
-    injury: 'trauma',
-    cardiac: 'cardiology',
-    emergency: 'emergency'
-  };
-
-  const mappedCategory = categoryMapping[category.toLowerCase()] || category.toLowerCase();
-  console.log(`🔄 Mapped category '${category}' to '${mappedCategory}'`);
-
-  let bestHospital = null;
-  let bestScore = -Infinity;
-
-  for (const hospital of hospitals) {
-    // Check if hospital has location data
-    if (!hospital.location || typeof hospital.location.lat !== 'number' || typeof hospital.location.lng !== 'number') {
-      console.log(`⚠️ Hospital ${hospital.name} has invalid location data`);
-      continue;
-    }
-
-    const distance = calculateDistance(lat, lng, hospital.location.lat, hospital.location.lng);
-    let score = 100 - (hospital.load || 0) - distance; // Base score
-
-    // Check specialties
-    const hospitalSpecialties = hospital.specialties || [];
-    
-    if (hospitalSpecialties.includes(mappedCategory)) {
-      score += 20;
-      console.log(`✅ Hospital ${hospital.name} has specialty '${mappedCategory}' (+20 points)`);
-    }
-
-    if (priority === 'HIGH' && hospitalSpecialties.includes('trauma')) {
-      score += 15;
-      console.log(`🚨 Hospital ${hospital.name} has trauma specialty for HIGH priority (+15 points)`);
-    }
-
-    console.log(`🏥 Hospital: ${hospital.name}, Distance: ${distance.toFixed(2)}km, Score: ${score.toFixed(2)}`);
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestHospital = { hospital, distance };
-    }
-  }
-
-  if (bestHospital) {
-    console.log(`🎯 Best hospital selected: ${bestHospital.hospital.name} (Score: ${bestScore.toFixed(2)})`);
-  } else {
-    console.log('❌ No suitable hospital found');
-  }
-
-  return bestHospital;
+  // For high priority, return the closest
+  // For medium/low priority, we could implement additional logic here
+  return ambulanceDistances[0];
 };
 
-// Helper function to find ambulance by ID (supports both ObjectId and ambulance_id)
-const findAmbulanceById = async (ambulanceId) => {
-  let ambulance = await Ambulance.findById(ambulanceId);
-  if (!ambulance) {
-    ambulance = await Ambulance.findOne({ ambulance_id: ambulanceId });
-  }
-  return ambulance;
-};
-
-// ✅ MANUAL DISPATCH - Main dispatch function for Emergency Manager
-const dispatchAmbulance = async (req, res) => {
+// Main dispatch function
+exports.dispatchEmergency = async (req, res) => {
   try {
     const { emergencyId } = req.params;
-    console.log(`🚑 MANUAL DISPATCH for emergency: ${emergencyId}`);
-    
+    const io = getSocketInstance();
+
+    // Find the emergency
     const emergency = await Emergency.findById(emergencyId);
-    if (!emergency) return res.status(404).json({ error: 'Emergency not found' });
-    if (emergency.status !== 'pending') return res.status(400).json({ error: 'Emergency already handled' });
-
-    console.log(`📍 Emergency location: ${emergency.location.lat}, ${emergency.location.lng}`);
-    console.log(`🏷️ Emergency category: ${emergency.category}, Priority: ${emergency.priority}`);
-
-    // Find nearest available ambulance
-    const nearestResult = await findNearestAmbulance(emergency.location);
-    if (!nearestResult) {
-      return res.status(404).json({ error: 'No available ambulances found' });
+    if (!emergency) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Emergency not found" 
+      });
     }
 
-    const { ambulance, distance } = nearestResult;
-    
-    // Find best hospital
-    const hospitalData = await findBestHospital(
-      emergency.location.lat, 
-      emergency.location.lng, 
-      emergency.category, 
-      emergency.priority
+    if (emergency.status !== "pending") {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Emergency already dispatched or resolved" 
+      });
+    }
+
+    // Find best ambulance and hospital
+    const bestAmbulance = await findBestAmbulance(emergency.location, emergency.priority);
+    const bestHospital = await findBestHospital(emergency.location, emergency.category, emergency.priority);
+
+    // Calculate distances and ETAs
+    const ambulanceToEmergencyDistance = bestAmbulance.distance;
+    const emergencyToHospitalDistance = calculateDistance(
+      emergency.location.lat,
+      emergency.location.lng,
+      bestHospital.hospital.location.lat,
+      bestHospital.hospital.location.lng
     );
-    
-    if (!hospitalData) return res.status(404).json({ error: 'No suitable hospital found' });
 
-    // Calculate ETA from ambulance to emergency location
-    const etaInSeconds = await calculateETA(ambulance.currentLocation, emergency.location);
-    const estimatedArrival = new Date(Date.now() + etaInSeconds * 1000);
+    const etaToEmergency = estimateArrivalTime(ambulanceToEmergencyDistance);
+    const etaToHospital = estimateArrivalTime(ambulanceToEmergencyDistance + emergencyToHospitalDistance);
 
-    // ✅ Update emergency status
-    emergency.status = 'dispatched';
-    emergency.assignedAmbulance = ambulance._id;
-    await emergency.save();
-
-    // ✅ Update ambulance
-    ambulance.status = 'dispatched';
-    ambulance.currentEmergency = emergency._id;
-    ambulance.destination = {
-      type: 'emergency',
-      location: emergency.location,
-      hospitalId: hospitalData.hospital._id,
-      hospitalLocation: hospitalData.hospital.location,
-      eta: etaInSeconds,
-      estimatedArrival
-    };
-    await ambulance.save();
-
-    // Create comprehensive dispatch data for frontend
-    const dispatchData = {
-      emergencyId: emergency._id,
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id,
-      hospitalId: hospitalData.hospital._id,
-      ambulanceLocation: ambulance.currentLocation,
-      emergencyLocation: emergency.location,
-      hospitalLocation: hospitalData.hospital.location,
-      status: 'dispatched',
-      dispatchTime: new Date(),
-      estimatedArrival,
-      emergency: {
-        _id: emergency._id,
-        category: emergency.category,
-        priority: emergency.priority,
-        patientName: emergency.patientName,
-        contactNumber: emergency.contactNumber
+    // Update ambulance
+    const updatedAmbulance = await Ambulance.findByIdAndUpdate(
+      bestAmbulance.ambulance._id,
+      {
+        status: "dispatched",
+        currentEmergency: emergencyId,
+        destination: {
+          type: "emergency",
+          location: {
+            lat: emergency.location.lat,
+            lng: emergency.location.lng
+          },
+          hospitalId: bestHospital.hospital._id,
+          hospitalLocation: {
+            lat: bestHospital.hospital.location.lat,
+            lng: bestHospital.hospital.location.lng
+          }
+        }
       },
-      destination: {
-        hospitalId: hospitalData.hospital._id,
-        hospitalName: hospitalData.hospital.name
+      { new: true }
+    );
+
+    // Update emergency
+    const updatedEmergency = await Emergency.findByIdAndUpdate(
+      emergencyId,
+      {
+        status: "dispatched",
+        assignedAmbulance: bestAmbulance.ambulance._id
       },
-      driverName: ambulance.driverName
-    };
+      { new: true }
+    );
 
-    // ✅ Emit real-time updates to all connected clients
-    const io = getSocketInstance();
-    io.emit('ambulance-dispatched', dispatchData);
-    io.emit('emergency-status-updated', {
-      emergencyId: emergency._id,
-      newStatus: 'dispatched',
-      ambulanceId: ambulance._id
+    // Update hospital load
+    await Hospital.findByIdAndUpdate(
+      bestHospital.hospital._id,
+      { $inc: { load: 1 } }
+    );
+
+    // Emit socket event for real-time updates
+    if (io) {
+      io.emit("dispatch:new", {
+        emergencyId: updatedEmergency._id,
+        ambulanceId: updatedAmbulance._id,
+        hospitalId: bestHospital.hospital._id,
+        status: "dispatched",
+        etaToEmergency: etaToEmergency,
+        etaToHospital: etaToHospital,
+        dispatchTime: new Date(),
+        distances: {
+          ambulanceToEmergency: ambulanceToEmergencyDistance,
+          emergencyToHospital: emergencyToHospitalDistance
+        },
+        emergency: {
+          id: updatedEmergency._id,
+          patientName: updatedEmergency.patientName,
+          contactNumber: updatedEmergency.contactNumber,
+          location: updatedEmergency.location,
+          category: updatedEmergency.category,
+          priority: updatedEmergency.priority,
+          status: updatedEmergency.status,
+          timestamp: updatedEmergency.timestamp
+        },
+        ambulance: {
+          id: updatedAmbulance._id,
+          ambulance_id: updatedAmbulance.ambulance_id,
+          driverName: updatedAmbulance.driverName,
+          currentLocation: updatedAmbulance.currentLocation,
+          status: updatedAmbulance.status
+        },
+        hospital: {
+          id: bestHospital.hospital._id,
+          hospital_id: bestHospital.hospital.hospital_id,
+          name: bestHospital.hospital.name,
+          location: bestHospital.hospital.location,
+          specialties: bestHospital.hospital.specialties,
+          load: bestHospital.hospital.load
+        }
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Emergency dispatched successfully",
+      data: {
+        emergencyId: updatedEmergency._id,
+        ambulanceId: updatedAmbulance._id,
+        hospitalId: bestHospital.hospital._id,
+        etaToEmergency: etaToEmergency,
+        etaToHospital: etaToHospital,
+        distances: {
+          ambulanceToEmergency: Math.round(ambulanceToEmergencyDistance * 100) / 100,
+          emergencyToHospital: Math.round(emergencyToHospitalDistance * 100) / 100
+        }
+      }
     });
-    io.emit('ambulance-status-updated', {
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id,
-      newStatus: 'dispatched'
+
+  } catch (error) {
+    console.error("Dispatch error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
+  }
+};
 
-    console.log(`🚑 Successfully dispatched ambulance ${ambulance.ambulance_id} to emergency ${emergency._id}`);
+// Get all active dispatches
+exports.getActiveDispatches = async (req, res) => {
+  try {
+    // Find all emergencies that are dispatched (not pending or resolved)
+    const activeEmergencies = await Emergency.find({ 
+      status: "dispatched" 
+    })
+    .populate({
+      path: 'assignedAmbulance',
+      model: 'Ambulance'
+    })
+    .sort({ timestamp: -1 });
 
-    // Send success response
+    const dispatches = [];
+
+    for (const emergency of activeEmergencies) {
+      if (emergency.assignedAmbulance) {
+        // Get hospital info from ambulance destination
+        let hospital = null;
+        if (emergency.assignedAmbulance.destination && emergency.assignedAmbulance.destination.hospitalId) {
+          hospital = await Hospital.findById(emergency.assignedAmbulance.destination.hospitalId);
+        }
+
+        dispatches.push({
+          emergencyId: emergency._id,
+          status: emergency.status,
+          dispatchTime: emergency.timestamp,
+          emergency: {
+            id: emergency._id,
+            patientName: emergency.patientName,
+            contactNumber: emergency.contactNumber,
+            location: emergency.location,
+            category: emergency.category,
+            priority: emergency.priority,
+            status: emergency.status,
+            timestamp: emergency.timestamp
+          },
+          ambulance: {
+            id: emergency.assignedAmbulance._id,
+            ambulance_id: emergency.assignedAmbulance.ambulance_id,
+            driverName: emergency.assignedAmbulance.driverName,
+            currentLocation: emergency.assignedAmbulance.currentLocation,
+            status: emergency.assignedAmbulance.status
+          },
+          hospital: hospital ? {
+            id: hospital._id,
+            hospital_id: hospital.hospital_id,
+            name: hospital.name,
+            location: hospital.location,
+            specialties: hospital.specialties,
+            load: hospital.load
+          } : null
+        });
+      }
+    }
+
     res.json({
       success: true,
-      message: 'Ambulance dispatched successfully',
-      dispatch: dispatchData,
-      ambulance: {
-        id: ambulance._id,
-        ambulance_id: ambulance.ambulance_id,
-        driverName: ambulance.driverName
-      },
-      hospital: {
-        name: hospitalData.hospital.name,
-        distance: hospitalData.distance.toFixed(2) + ' km'
-      },
-      estimatedArrival,
-      distance: distance.toFixed(2) + ' km'
+      count: dispatches.length,
+      dispatches: dispatches
     });
 
   } catch (error) {
-    console.error('❌ Manual dispatch error:', error);
-    res.status(500).json({ error: error.message });
+    console.error("Get active dispatches error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
-// Ambulance arrives at emergency location
-const arriveAtEmergency = async (req, res) => {
+// Update ambulance location (for real-time tracking)
+exports.updateAmbulanceLocation = async (req, res) => {
   try {
     const { ambulanceId } = req.params;
-    console.log(`🚑 Ambulance ${ambulanceId} arriving at emergency`);
-    
-    const ambulance = await findAmbulanceById(ambulanceId);
+    const { lat, lng } = req.body;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Latitude (lat) and longitude (lng) are required" 
+      });
+    }
+
+    const ambulance = await Ambulance.findByIdAndUpdate(
+      ambulanceId,
+      {
+        currentLocation: { lat: parseFloat(lat), lng: parseFloat(lng) }
+      },
+      { new: true }
+    );
+
     if (!ambulance) {
-      return res.status(404).json({ error: 'Ambulance not found' });
+      return res.status(404).json({ 
+        success: false, 
+        error: "Ambulance not found" 
+      });
     }
 
-    if (ambulance.status !== 'dispatched') {
-      return res.status(400).json({ error: `Invalid ambulance status: ${ambulance.status}. Expected: dispatched` });
-    }
-
-    if (!ambulance.destination || !ambulance.destination.location) {
-      console.error(`❌ Ambulance ${ambulance.ambulance_id} has no valid destination`);
-      return res.status(400).json({ error: 'Ambulance destination not set' });
-    }
-
-    // Update ambulance status and location
-    ambulance.status = 'busy';
-    ambulance.currentLocation = ambulance.destination.location;
-    await ambulance.save();
-
+    // Emit real-time location update
     const io = getSocketInstance();
-    io.emit('ambulance-status-updated', { 
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id, 
-      newStatus: 'busy' 
-    });
-    io.emit('ambulance-location-updated', { 
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id, 
-      location: ambulance.currentLocation 
-    });
+    if (io) {
+      io.emit("ambulance:location-update", {
+        ambulanceId: ambulance._id,
+        ambulance_id: ambulance.ambulance_id,
+        currentLocation: ambulance.currentLocation,
+        status: ambulance.status,
+        timestamp: new Date()
+      });
+    }
 
-    console.log(`🚑 Ambulance ${ambulance.ambulance_id} arrived at emergency`);
-
-    res.json({ 
-      success: true, 
-      message: 'Ambulance arrived at emergency location',
+    res.json({
+      success: true,
+      message: "Location updated successfully",
       ambulance: {
         id: ambulance._id,
         ambulance_id: ambulance.ambulance_id,
+        currentLocation: ambulance.currentLocation,
         status: ambulance.status
       }
     });
+
   } catch (error) {
-    console.error('❌ arriveAtEmergency error:', error);
-    res.status(500).json({ error: error.message });
+    console.error("Update location error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
-// Begin transporting patient to hospital
-const transportToHospital = async (req, res) => {
+// Mark ambulance as arrived at emergency location
+exports.markArrivedAtEmergency = async (req, res) => {
   try {
-    const { ambulanceId } = req.params;
-    
-    const ambulance = await findAmbulanceById(ambulanceId);
-    if (!ambulance) {
-      return res.status(404).json({ error: 'Ambulance not found' });
+    const { emergencyId } = req.params;
+
+    const emergency = await Emergency.findById(emergencyId)
+      .populate({
+        path: 'assignedAmbulance',
+        model: 'Ambulance'
+      });
+
+    if (!emergency) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Emergency not found" 
+      });
     }
 
-    if (ambulance.status !== 'busy') {
-      return res.status(400).json({ error: `Invalid ambulance status: ${ambulance.status}. Expected: busy` });
+    if (emergency.status !== "dispatched") {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Emergency is not in dispatched status" 
+      });
     }
 
-    ambulance.status = 'transporting';
-    await ambulance.save();
+    // Update ambulance status to busy (at emergency location)
+    await Ambulance.findByIdAndUpdate(
+      emergency.assignedAmbulance._id,
+      { status: "busy" }
+    );
 
     const io = getSocketInstance();
-    io.emit('ambulance-status-updated', { 
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id, 
-      newStatus: 'transporting' 
+    if (io) {
+      io.emit("ambulance:arrived-emergency", {
+        emergencyId: emergency._id,
+        ambulanceId: emergency.assignedAmbulance._id,
+        timestamp: new Date()
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Marked as arrived at emergency location"
     });
 
-    console.log(`🚑 Ambulance ${ambulance.ambulance_id} transporting patient to hospital`);
-
-    res.json({ 
-      success: true, 
-      message: 'Transporting patient to hospital',
-      ambulance: {
-        id: ambulance._id,
-        ambulance_id: ambulance.ambulance_id,
-        status: ambulance.status
-      }
-    });
   } catch (error) {
-    console.error('❌ transportToHospital error:', error);
-    res.status(500).json({ error: error.message });
+    console.error("Mark arrived at emergency error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
-// Complete dispatch (arrived at hospital)
-const completeDispatch = async (req, res) => {
+// Mark ambulance as transporting patient to hospital
+exports.markTransporting = async (req, res) => {
   try {
-    const { ambulanceId } = req.params;
-    
-    const ambulance = await findAmbulanceById(ambulanceId);
-    if (!ambulance) {
-      return res.status(404).json({ error: 'Ambulance not found' });
+    const { emergencyId } = req.params;
+
+    const emergency = await Emergency.findById(emergencyId)
+      .populate({
+        path: 'assignedAmbulance',
+        model: 'Ambulance'
+      });
+
+    if (!emergency) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Emergency not found" 
+      });
     }
 
-    if (ambulance.status !== 'transporting') {
-      return res.status(400).json({ error: `Invalid ambulance status: ${ambulance.status}. Expected: transporting` });
+    // Update ambulance status to transporting
+    await Ambulance.findByIdAndUpdate(
+      emergency.assignedAmbulance._id,
+      { status: "transporting" }
+    );
+
+    const io = getSocketInstance();
+    if (io) {
+      io.emit("ambulance:transporting", {
+        emergencyId: emergency._id,
+        ambulanceId: emergency.assignedAmbulance._id,
+        timestamp: new Date()
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Marked as transporting patient"
+    });
+
+  } catch (error) {
+    console.error("Mark transporting error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+};
+
+// Complete emergency (arrived at hospital)
+exports.completeEmergency = async (req, res) => {
+  try {
+    const { emergencyId } = req.params;
+
+    const emergency = await Emergency.findById(emergencyId)
+      .populate({
+        path: 'assignedAmbulance',
+        model: 'Ambulance'
+      });
+
+    if (!emergency) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Emergency not found" 
+      });
     }
 
     // Update emergency status to resolved
-    const emergency = await Emergency.findById(ambulance.currentEmergency);
-    if (emergency) {
-      emergency.status = 'resolved';
-      await emergency.save();
+    const updatedEmergency = await Emergency.findByIdAndUpdate(
+      emergencyId,
+      { status: "resolved" },
+      { new: true }
+    );
 
-      const io = getSocketInstance();
-      io.emit('emergency-status-updated', {
-        emergencyId: emergency._id,
-        newStatus: 'resolved'
-      });
+    // Update ambulance status back to available and clear assignments
+    await Ambulance.findByIdAndUpdate(
+      emergency.assignedAmbulance._id,
+      {
+        status: "available",
+        currentEmergency: null,
+        destination: {}
+      }
+    );
+
+    // Decrease hospital load
+    if (emergency.assignedAmbulance.destination && emergency.assignedAmbulance.destination.hospitalId) {
+      await Hospital.findByIdAndUpdate(
+        emergency.assignedAmbulance.destination.hospitalId,
+        { $inc: { load: -1 } }
+      );
     }
-
-    // Update hospital load
-    const hospital = await Hospital.findById(ambulance.destination?.hospitalId);
-    if (hospital && hospital.load < 95) {
-      hospital.load += 5;
-      await hospital.save();
-      
-      const io = getSocketInstance();
-      io.emit('hospitalUpdate', hospital);
-    }
-
-    // Reset ambulance status and location
-    ambulance.status = 'available';
-    ambulance.currentLocation = ambulance.destination.hospitalLocation;
-    ambulance.currentEmergency = null;
-    ambulance.destination = null;
-    await ambulance.save();
 
     const io = getSocketInstance();
-    io.emit('ambulance-status-updated', {
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id,
-      newStatus: 'available'
-    });
-    io.emit('ambulance-location-updated', {
-      ambulanceId: ambulance._id,
-      ambulance_id: ambulance.ambulance_id,
-      location: ambulance.currentLocation
-    });
-
-    console.log(`✅ Mission completed! Ambulance ${ambulance.ambulance_id} is now available`);
-
-    res.json({
-      success: true,
-      message: 'Mission completed successfully. Ambulance is now available.',
-      ambulance: {
-        id: ambulance._id,
-        ambulance_id: ambulance.ambulance_id,
-        status: ambulance.status,
-        location: ambulance.currentLocation
-      }
-    });
-  } catch (error) {
-    console.error('❌ completeDispatch error:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Get all active dispatches for Emergency Manager View
-const getActiveDispatches = async (req, res) => {
-  try {
-    const ambulances = await Ambulance.find({ 
-      status: { $in: ['dispatched', 'busy', 'transporting'] } 
-    }).populate('currentEmergency');
-
-    const result = await Promise.all(ambulances.map(async amb => {
-      let estimatedArrival = null;
-
-      const status = amb.status;
-      const ambulanceLoc = amb.currentLocation;
-      const emergencyLoc = amb.destination?.location;
-      const hospitalLoc = amb.destination?.hospitalLocation;
-
-      // Calculate real-time ETA based on current status
-      if (status === 'dispatched') {
-        if (ambulanceLoc && emergencyLoc) {
-          const seconds = await calculateETA(ambulanceLoc, emergencyLoc);
-          estimatedArrival = new Date(Date.now() + seconds * 1000);
-        }
-      } else if (status === 'busy' || status === 'transporting') {
-        if (ambulanceLoc && hospitalLoc) {
-          const seconds = await calculateETA(ambulanceLoc, hospitalLoc);
-          estimatedArrival = new Date(Date.now() + seconds * 1000);
-        }
-      }
-
-      return {
-        ambulanceId: amb._id,
-        ambulance_id: amb.ambulance_id,
-        status: amb.status,
-        currentLocation: amb.currentLocation,
-        emergencyLocation: amb.destination?.location,
-        hospitalLocation: amb.destination?.hospitalLocation,
-        emergency: amb.currentEmergency,
-        destination: amb.destination,
-        driverName: amb.driverName,
-        estimatedArrival: estimatedArrival || amb.destination?.estimatedArrival
-      };
-    }));
-
-    res.json({
-      success: true,
-      data: result,
-      count: result.length
-    });
-  } catch (error) {
-    console.error('❌ getActiveDispatches error:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// ✅ Get available ambulances for manual dispatch selection
-const getAvailableAmbulances = async (req, res) => {
-  try {
-    const { lat, lng } = req.query;
-    
-    const ambulances = await Ambulance.find({ status: 'available' });
-    
-    if (!lat || !lng) {
-      return res.json({
-        success: true,
-        data: ambulances.map(amb => ({
-          _id: amb._id,
-          ambulance_id: amb.ambulance_id,
-          driverName: amb.driverName,
-          currentLocation: amb.currentLocation,
-          status: amb.status
-        }))
+    if (io) {
+      io.emit("emergency:completed", {
+        emergencyId: emergency._id,
+        ambulanceId: emergency.assignedAmbulance._id,
+        timestamp: new Date()
       });
     }
 
-    // Calculate distances and sort by nearest
-    const ambulancesWithDistance = ambulances.map(amb => {
-      const distance = calculateDistance(
-        parseFloat(lat), 
-        parseFloat(lng), 
-        amb.currentLocation.lat, 
-        amb.currentLocation.lng
-      );
-      
-      return {
-        _id: amb._id,
-        ambulance_id: amb.ambulance_id,
-        driverName: amb.driverName,
-        currentLocation: amb.currentLocation,
-        status: amb.status,
-        distance: distance.toFixed(2),
-        estimatedArrival: null // Will be calculated when dispatched
-      };
-    }).sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
-
     res.json({
       success: true,
-      data: ambulancesWithDistance,
-      count: ambulancesWithDistance.length
+      message: "Emergency completed successfully",
+      emergency: updatedEmergency
     });
+
   } catch (error) {
-    console.error('❌ getAvailableAmbulances error:', error);
-    res.status(500).json({ error: error.message });
+    console.error("Complete emergency error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
+// Get dispatch statistics
+exports.getDispatchStats = async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
+    const stats = {
+      totalEmergencies: await Emergency.countDocuments(),
+      pendingEmergencies: await Emergency.countDocuments({ status: "pending" }),
+      activeDispatches: await Emergency.countDocuments({ status: "dispatched" }),
+      resolvedToday: await Emergency.countDocuments({
+        status: "resolved",
+        timestamp: { $gte: today }
+      }),
+      totalAmbulances: await Ambulance.countDocuments(),
+      availableAmbulances: await Ambulance.countDocuments({ status: "available" }),
+      busyAmbulances: await Ambulance.countDocuments({ 
+        status: { $in: ["dispatched", "busy", "transporting"] } 
+      }),
+      totalHospitals: await Hospital.countDocuments(),
+      averageHospitalLoad: await calculateAverageHospitalLoad(),
+      emergencyBreakdown: await getEmergencyBreakdown()
+    };
 
-module.exports = {
-  dispatchAmbulance,        // ✅ Main manual dispatch function
-  arriveAtEmergency,
-  transportToHospital,
-  completeDispatch,
-  getActiveDispatches,      // ✅ For Emergency Manager dashboard
-  getAvailableAmbulances,   // ✅ New: Get available ambulances for selection
- 
- 
+    res.json({
+      success: true,
+      stats,
+      timestamp: new Date()
+    });
+
+  } catch (error) {
+    console.error("Get stats error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+};
+
+// Helper function to calculate average hospital load
+const calculateAverageHospitalLoad = async () => {
+  try {
+    const hospitals = await Hospital.find({}, 'load');
+    if (hospitals.length === 0) return 0;
+    
+    const totalLoad = hospitals.reduce((sum, hospital) => sum + hospital.load, 0);
+    return Math.round((totalLoad / hospitals.length) * 100) / 100;
+  } catch (error) {
+    console.error("Calculate hospital load error:", error);
+    return 0;
+  }
+};
+
+// Helper function to get emergency breakdown by category and priority
+const getEmergencyBreakdown = async () => {
+  try {
+    const categoryBreakdown = await Emergency.aggregate([
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    const priorityBreakdown = await Emergency.aggregate([
+      { $group: { _id: "$priority", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    const statusBreakdown = await Emergency.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    return {
+      byCategory: categoryBreakdown,
+      byPriority: priorityBreakdown,
+      byStatus: statusBreakdown
+    };
+  } catch (error) {
+    console.error("Get emergency breakdown error:", error);
+    return {
+      byCategory: [],
+      byPriority: [],
+      byStatus: []
+    };
+  }
+};
+
+// Get emergency details with full dispatch info
+exports.getEmergencyDetails = async (req, res) => {
+  try {
+    const { emergencyId } = req.params;
+
+    const emergency = await Emergency.findById(emergencyId)
+      .populate({
+        path: 'assignedAmbulance',
+        model: 'Ambulance'
+      });
+
+    if (!emergency) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "Emergency not found" 
+      });
+    }
+
+    let hospital = null;
+    if (emergency.assignedAmbulance && 
+        emergency.assignedAmbulance.destination && 
+        emergency.assignedAmbulance.destination.hospitalId) {
+      hospital = await Hospital.findById(emergency.assignedAmbulance.destination.hospitalId);
+    }
+
+    const response = {
+      success: true,
+      emergency: {
+        id: emergency._id,
+        patientName: emergency.patientName,
+        contactNumber: emergency.contactNumber,
+        location: emergency.location,
+        category: emergency.category,
+        priority: emergency.priority,
+        status: emergency.status,
+        timestamp: emergency.timestamp
+      },
+      ambulance: emergency.assignedAmbulance ? {
+        id: emergency.assignedAmbulance._id,
+        ambulance_id: emergency.assignedAmbulance.ambulance_id,
+        driverName: emergency.assignedAmbulance.driverName,
+        currentLocation: emergency.assignedAmbulance.currentLocation,
+        status: emergency.assignedAmbulance.status,
+        destination: emergency.assignedAmbulance.destination
+      } : null,
+      hospital: hospital ? {
+        id: hospital._id,
+        hospital_id: hospital.hospital_id,
+        name: hospital.name,
+        location: hospital.location,
+        specialties: hospital.specialties,
+        load: hospital.load
+      } : null
+    };
+
+    res.json(response);
+
+  } catch (error) {
+    console.error("Get emergency details error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
 };
