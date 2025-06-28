@@ -1,3 +1,4 @@
 flask
-whisper
-spacy
+numpy
+spicy
+speech_recognition

@@ -34,6 +34,7 @@ app.use("/api/ambulance", require("./routes/ambulanceRoutes"));
 app.use("/api/hospitals", require("./routes/hospitalRoutes"));
 app.use("/api/dispatch", require("./routes/dispatchRoutes")); // ✅ Correct dispatch route
 app.get("/api/dashboard/summary", dashboardController.getFullDashboardSummary);
+app.use("/analyze", require("./routes/analyzeRoutes"));
 
 // 404 handler
 app.use((req, res) => {

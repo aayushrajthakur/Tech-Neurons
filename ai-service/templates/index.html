@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Voice Risk Analyzer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 2rem;
+      text-align: center;
+    }
+    .risk-output {
+      margin-top: 2rem;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🎤 Voice Risk Analyzer</h1>
+  
+  <form id="uploadForm" enctype="multipart/form-data">
+    <input type="file" accept="audio/*" name="audio" required>
+    <br><br>
+    <button type="submit">Analyze Risk</button>
+  </form>
+
+  <div class="risk-output" id="riskLevel"></div>
+
+  <script>
+    const form = document.getElementById("uploadForm");
+    const riskOutput = document.getElementById("riskLevel");
+
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+      riskOutput.textContent = "Analyzing...";
+
+      try {
+        const response = await fetch("/analyze", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          riskOutput.textContent = `Risk Level: ${data.risk_level} (Score: ${data.risk_score}/10)`;
+          riskOutput.style.color = data.risk_level === "HIGH" ? "red" :
+                                   data.risk_level === "MEDIUM" ? "orange" : "green";
+        } else {
+          riskOutput.textContent = "Error: " + data.error;
+          riskOutput.style.color = "black";
+        }
+      } catch (err) {
+        riskOutput.textContent = "Failed to connect to server.";
+        riskOutput.style.color = "black";
+      }
+    });
+  </script>
+
+</body>
+</html>

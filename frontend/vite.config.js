@@ -9,4 +9,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'), // ✅ Path alias for ShadCN + cleaner imports
     },
   },
+  proxy: {
+    '/analyze': 'http://localhost:5000',
+  }
 });

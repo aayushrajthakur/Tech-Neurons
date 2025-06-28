@@ -1,12 +1,13 @@
 const mongoose = require("mongoose");
+
 const emergencySchema = new mongoose.Schema({
   patientName: { type: String, default: "Unknown" },
 
   contactNumber: { 
-    type: String, 
-    required: true, 
-    match: /^[6-9]\d{9}$/ 
-  },
+  type: String, 
+  required: false,
+  default: "0000000000"
+},
 
   location: {
     lat: { type: Number, required: true },
@@ -19,7 +20,26 @@ const emergencySchema = new mongoose.Schema({
     required: true
   },
 
-  category: { type: String, required: true },
+  category: { 
+    type: String, 
+    required: true,
+    default: "General"
+  },
+
+  description: { type: String }, // Transcribed voice
+
+  risk_score: { 
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 50
+  },
+
+  risk_level: {
+    type: String,
+    enum: ["LOW", "MEDIUM", "HIGH"],
+    default: "MEDIUM"
+  },
 
   status: {
     type: String,
@@ -44,4 +64,5 @@ const emergencySchema = new mongoose.Schema({
     ref: 'Ambulance' 
   }
 });
+
 module.exports = mongoose.model("Emergency", emergencySchema);
