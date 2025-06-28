@@ -1,36 +1,34 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useVoiceRecorder } from "../../hooks/useVoiceRecorder"; // ⬅ Import custom hook
+import VoiceRecorder from "../../components/ui/VoiceRecorder"; // animated component
 
 const ReportEmergency = () => {
   const [location, setLocation] = useState({ lat: "", lng: "" });
+  const [audioBlob, setAudioBlob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const navigate = useNavigate();
 
-  const {
-    recording,
-    audioBlob,
-    startRecording,
-    stopRecording,
-  } = useVoiceRecorder();
-
   const handleLocationClick = () => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          lat: position.coords.latitude.toFixed(6),
-          lng: position.coords.longitude.toFixed(6),
-        });
-      },
-      () => alert("⚠️ Location access denied.")
-    );
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) =>
+          setLocation({
+            lat: pos.coords.latitude.toFixed(6),
+            lng: pos.coords.longitude.toFixed(6),
+          }),
+        () => alert("⚠️ Location access denied.")
+      );
+    } else {
+      alert("❌ Geolocation not supported.");
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     if (!audioBlob || !location.lat || !location.lng) {
-      alert("⚠️ Please record audio and enter location.");
+      alert("⚠️ Please record voice and set location.");
       return;
     }
 
@@ -48,80 +46,78 @@ const ReportEmergency = () => {
 
       const data = await res.json();
       if (res.ok && data.success) {
+        setResult(data);
         alert(`✅ Emergency reported.\nRisk: ${data.risk_level}\nScore: ${data.risk_score}`);
         navigate("/");
       } else {
-        alert("❌ Error: " + data.error);
+        alert("❌ " + data.error);
       }
     } catch (err) {
       console.error(err);
-      alert("❌ Failed to submit.");
+      alert("❌ Failed to report emergency.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-xl mx-auto p-6 bg-white shadow rounded">
-      <h2 className="text-2xl font-bold mb-4">🎙️ Report Emergency via Live Voice</h2>
+    <div className="max-w-2xl mx-auto mt-8 p-6 bg-white dark:bg-gray-900 rounded-2xl shadow-lg">
+      <h1 className="text-3xl font-bold mb-6 text-center text-gray-800 dark:text-white">
+        🆘 Report Emergency via Voice
+      </h1>
 
-      {/* 🎤 Record / Stop buttons */}
-      <div className="flex gap-4 mb-4">
-        <button
-          type="button"
-          onClick={startRecording}
-          disabled={recording}
-          className="bg-blue-500 text-white px-4 py-2 rounded"
-        >
-          🎙️ Start Recording
-        </button>
-        <button
-          type="button"
-          onClick={stopRecording}
-          disabled={!recording}
-          className="bg-gray-500 text-white px-4 py-2 rounded"
-        >
-          ⏹️ Stop
-        </button>
-      </div>
-
-      {/* 📍 Use Location */}
+      {/* 🌐 Location */}
       <button
         type="button"
         onClick={handleLocationClick}
-        className="text-blue-600 underline text-sm hover:text-blue-800"
+        className="text-blue-600 dark:text-blue-400 underline text-sm hover:text-blue-800 dark:hover:text-blue-300 mb-4"
       >
         📍 Use My Current Location
       </button>
 
-      <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-        <div className="grid grid-cols-2 gap-4">
-          <input
-            type="number"
-            placeholder="Latitude"
-            value={location.lat}
-            onChange={(e) => setLocation((prev) => ({ ...prev, lat: e.target.value }))}
-            required
-            className="p-2 border rounded"
-          />
-          <input
-            type="number"
-            placeholder="Longitude"
-            value={location.lng}
-            onChange={(e) => setLocation((prev) => ({ ...prev, lng: e.target.value }))}
-            required
-            className="p-2 border rounded"
-          />
-        </div>
+      {/* 🗺️ Location fields */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <input
+          type="number"
+          placeholder="Latitude"
+          value={location.lat}
+          onChange={(e) => setLocation({ ...location, lat: e.target.value })}
+          required
+          className="p-2 border rounded dark:bg-gray-800 dark:text-white"
+        />
+        <input
+          type="number"
+          placeholder="Longitude"
+          value={location.lng}
+          onChange={(e) => setLocation({ ...location, lng: e.target.value })}
+          required
+          className="p-2 border rounded dark:bg-gray-800 dark:text-white"
+        />
+      </div>
 
+      {/* 🎙️ Voice Recorder */}
+      <VoiceRecorder onRecordingComplete={(blob) => setAudioBlob(blob)} />
+
+      {/* 🚨 Submit */}
+      <form onSubmit={handleSubmit} className="mt-6">
         <button
           type="submit"
           disabled={loading || !audioBlob}
-          className="w-full bg-red-600 text-white py-2 rounded hover:bg-red-700 disabled:opacity-50"
+          className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg shadow disabled:opacity-50"
         >
-          {loading ? "Submitting..." : "🚨 Submit Voice Emergency"}
+          {loading ? "Submitting..." : "🚨 Submit Emergency"}
         </button>
       </form>
+
+      {/* ✅ Result */}
+      {result && (
+        <div className="mt-6 bg-gray-100 dark:bg-gray-800 p-4 rounded shadow">
+          <h3 className="font-semibold mb-1 text-gray-700 dark:text-gray-200">✅ AI Result:</h3>
+          <p>🩸 Risk Level: <strong>{result.risk_level}</strong></p>
+          <p>📊 Risk Score: <strong>{result.risk_score}</strong></p>
+          <p>📁 Type: <strong>{result.emergency_type}</strong></p>
+        </div>
+      )}
     </div>
   );
 };

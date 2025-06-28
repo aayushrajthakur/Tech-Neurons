@@ -1,36 +1,48 @@
-// useVoiceRecorder.js (Custom Hook)
+// hooks/useVoiceRecorder.js
 import { useState, useRef } from "react";
 
-export const useVoiceRecorder = () => {
+const useVoiceRecorder = () => {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
   const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const chunksRef = useRef([]);
 
   const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorderRef.current = new MediaRecorder(stream);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
 
-    mediaRecorderRef.current.ondataavailable = (e) => {
-      audioChunksRef.current.push(e.data);
-    };
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
 
-    mediaRecorderRef.current.onstop = () => {
-      const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-      setAudioBlob(audioBlob);
-      audioChunksRef.current = [];
-    };
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        setAudioBlob(blob);
+        stream.getTracks().forEach((track) => track.stop());
+      };
 
-    mediaRecorderRef.current.start();
-    setRecording(true);
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
+      mediaRecorder.start();
+      setRecording(true);
+    } catch (err) {
+      alert("🎙️ Microphone access denied.");
+      console.error("Recording error:", err);
     }
   };
 
-  return { recording, audioBlob, startRecording, stopRecording };
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  };
+
+  return {
+    recording,
+    audioBlob,
+    startRecording,
+    stopRecording,
+  };
 };
+
+export default useVoiceRecorder;
